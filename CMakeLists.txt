@@ -40,6 +40,10 @@ add_library(tempo STATIC
   src/virtual/clock.cpp
   src/capability/system_capability.cpp
   src/record/event.cpp
+  src/record/crc32.cpp
+  src/record/string_table.cpp
+  src/record/record.cpp
+  src/record/record_io.cpp
 )
 target_include_directories(tempo PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -76,6 +80,10 @@ if(BUILD_TESTING)
   tempo_add_test(version_test)
   tempo_add_test(rng_test)
   tempo_add_test(clock_test)
+  tempo_add_test(crc32_test)
+  tempo_add_test(string_table_test)
+  tempo_add_test(event_test)
+  tempo_add_test(record_roundtrip_test)
   tempo_add_test(task_test)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)

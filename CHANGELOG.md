@@ -3,6 +3,60 @@
 All notable changes to Tempo are documented here. Entries describe the commit
 series that produced this repository; there are no unreleased placeholders.
 
+## [0.2.0] - 2026-11-23
+
+Production-hardening pass. Record format v1 is unchanged; existing records remain
+readable.
+
+### Reliability and operations
+
+- Added a global approximate record-memory budget (`--max-memory-mb`, default
+  256 MiB) with oldest-first eviction and rejection of a single oversized
+  recording.
+- Added an on-disk record archive for records evicted from memory, with
+  `GET /api/archive` and `POST /api/records/open`; unsafe basenames are rejected.
+- Long replay batches now run on a bounded background job worker (`async: true`,
+  `GET /api/jobs/{id}`); the UI polls instead of freezing the SSE/HTTP loop.
+- Added soak tests (500 replays, 100 record round-trips, 100 workbench
+  record/delete cycles) and a 64 MiB HTTP import/download limit aligned with the
+  record cap.
+
+### Determinism and compatibility
+
+- Locale-independent formatting for watch doubles, JSON numbers and clock text;
+  a comma locale cannot corrupt recorded or persisted text.
+- Records and scenarios carry a generated SHA-256 build fingerprint; replay
+  reports a build mismatch in the API and UI without refusing to run.
+- HTTP record creation accepts full 64-bit seeds as decimal strings; records
+  expose a stable `uid` equal to the determinism hash.
+- Record filenames use the full 16-hex hash to remove the previous 32-bit prefix
+  collision risk.
+- Fixed the synchronous replay path to reject incomplete records before scenario
+  lookup (regression caught by the recovery test).
+
+### Security and packaging
+
+- Data, records and fixture directories are chmod'ed owner-only; fixture and
+  record files are `0600`.
+- Installed launcher, headers, docs, export targets and a relocatable
+  `find_package(tempo)` config; `make install-smoke` builds a consumer.
+- UI: archived-record loading, event type/task filters, skip link, live status,
+  keyboard-focusable event rows, canvas fallback text, focus styles and
+  reduced-motion CSS.
+- Added a headless UI smoke script that verifies tokenized assets, recording,
+  100 identical replays, mutation divergence and—where Chromium exists—a DOM
+  self-test.
+
+### Verification tooling
+
+- Added optional coverage-guided libFuzzer harnesses
+  (`-DTEMPO_LIBFUZZER=ON`, requires Clang + compiler-rt) and a
+  `-DTEMPO_COVERAGE=ON` build option.
+- Added an install smoke script, a UI smoke script and `make soak`.
+- Re-ran release, ASan/UBSan, TSan, deterministic fuzzing, benchmarks and the
+  browser/API smoke; results are in `docs/VERIFICATION.md` and
+  `FINAL_REPORT.md`.
+
 ## [0.1.0] - 2026-11-23
 
 ### Scaffold

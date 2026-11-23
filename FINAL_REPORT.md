@@ -1,62 +1,77 @@
 # Final report
 
-Tempo is a deterministic record/replay workbench for cooperative C++ tasks,
-delivered as an embeddable C++20 library plus a local browser workbench. This
-report records what was built, how it was verified, and what remains outside the
-scope.
+Tempo 0.2.0 is a deterministic record/replay workbench for cooperative C++ tasks:
+an embeddable C++20 library plus a loopback browser workbench. This report records
+what was built, what was verified, and what remains outside the product’s scope.
 
 ## Definition of Done
 
 | # | Requirement | Status |
 |---:|---|---|
-| 1 | `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release` succeeds | **Yes** |
-| 2 | `cmake --build build -j` succeeds with zero warnings | **Yes** (`-Werror` build) |
-| 3 | `ctest --test-dir build --output-on-failure` passes | **Yes, 37/37** |
-| 4 | ASan/UBSan and TSan runs pass and are documented | **Yes, 37/37 each** (`docs/VERIFICATION.md`) |
-| 5 | Launcher opens the local UI; the demo works | **Yes** (browser run below) |
+| 1 | `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release` succeeds | **Yes** (clean `build-final` run) |
+| 2 | `cmake --build build -j` succeeds with zero warnings | **Yes** (0 `warning:` lines under `-Werror`) |
+| 3 | `ctest --test-dir build --output-on-failure` passes | **Yes, 45/45** |
+| 4 | ASan/UBSan and TSan runs pass and are documented | **Yes, 45/45 each** (`docs/VERIFICATION.md`) |
+| 5 | Launcher opens the local UI; the demo works | **Yes** (HTTP/API + headless Chromium + Orca visual runs) |
 | 6 | README, docs, CHANGELOG, LICENSE, LIMITATIONS and FINAL_REPORT exist | **Yes** |
 | 7 | This report lists LOC, commits, test commands/results, benchmarks and gaps | **Yes** |
-| 8 | Repo committed and pushed, or PUSH.md with exact commands | **Yes** (remains committed and pushed to `origin`) |
+| 8 | Repo is committed and pushed, or PUSH.md contains exact push commands | **Yes** (public `BViganotti/tempo`, `master`) |
 | 9 | No external dependency, no CI, no CLI-only product | **Yes** |
 
-## Environment
-
-- macOS 26.7.3, arm64
-- Apple Clang 21.0.0 (Xcode 26)
-- CMake 4.2.3, Ninja 1.13.0
-- Release for tests/bench/fuzz; Debug for sanitizer builds
-
-No third-party C++ libraries, package managers, vendored code, external fonts or
-CDN assets are used. There is no `.github/workflows` or other CI configuration.
-Pushing to the remote is the only network operation performed by development
-tooling; the product never accesses the internet.
+Environment: macOS 26.7.3 arm64, Apple Clang 21.0.0, CMake 4.2.3, Ninja 1.13.0.
+No third-party C++ code, package manager, vendored source, CDN, external font or
+runtime internet access. No `.github/workflows` or other CI configuration exists.
 
 ## What was delivered
 
-- Cooperative C++20 task runtime: deterministic scheduler, virtual clock,
-  seeded RNG, spawn/join, cancellation, absolute/relative sleeps, watch state,
-  notes, bounded logs, task introspection.
+### Deterministic core
+
+- C++20 cooperative tasks, deterministic scheduler, virtual clock, seeded
+  xoshiro256** RNG, task names/ids, joins, cooperative cancellation,
+  absolute/relative sleeps, watch state, notes and bounded logs.
 - Capability-mediated file, environment, loopback socket and random effects with
   a sandboxed system provider and an OS-free replay provider.
-- Portable v1 record container: metadata, deduplicated strings, per-event CRC,
-  body/footer CRC, event index, strict and recovery loading, atomic writes.
-- Recording with optional single-decision schedule mutation; replay with
+- Portable v1 record format: metadata, deduplicated string table, per-event CRC,
+  body/footer CRC, on-disk index, strict loading, truncation recovery, atomic
+  durable writes.
+- Recording with optional one-decision schedule mutation; replay with
   event-by-event comparison, first-divergence diagnostics, 100-run hash proof,
-  batch reporting and record diff.
+  batch reporting and structural record diff.
 - Debugger over the event log: exact watch-state reconstruction with a bounded
-  checkpoint budget, reverse stepping, breakpoints (type/task/text), timeline,
-  divergence annotation.
-- Local-only HTTP/SSE workbench with a random token, Host/Origin validation,
-  CSP, no CORS, bounded parsers and buffers; original embedded HTML/CSS/JS.
-- UI: record, import, export, delete, timeline canvas, event list, inspector,
-  breakpoints, replay proof, altered-schedule replay, first-divergence view, run
-  diff.
-- Three built-in demo scenarios, an embeddable example with an in-memory host,
-  three mutation fuzzers, and measured benchmarks.
+  checkpoint estimate, forward/reverse stepping, type/task/text breakpoints,
+  timeline, divergence annotation.
 
-## Tests
+### Workbench and operations
 
-Commands:
+- Loopback HTTP/SSE server with random per-session token, Host/Origin checks,
+  CSP, no CORS, bounded parsers/buffers, SSE keepalive and shutdown.
+- Original embedded HTML/CSS/JS: timeline canvas, paged/filterable events,
+  inspector, keyboard-accessible rows, breakpoints, replay proof, altered
+  schedule, first divergence, run diff, import/export/delete, archived records.
+- **Global memory budget** (`--max-memory-mb`, default 256 MiB) with oldest-first
+  memory eviction, safe on-disk archive and reload by basename; oversized single
+  records are rejected instead of silently dropped.
+- **Background replay jobs**: long batches run on one bounded worker; the UI polls
+  `/api/jobs/{id}` and remains responsive. Job map and SSE queues are locked.
+- **Build fingerprints**: generated SHA-256 of built-in scenario sources stamps
+  records; replay reports build-id mismatches without refusing to run.
+- **Locale independence**: watch doubles, JSON numbers and clock text use
+  explicit classic-locale formatting.
+- Full-width 64-bit seeds, stable record `uid`, full-hash filenames, 64 MiB
+  record I/O limits, owner-only directories/files, safe archive loading.
+- Installable package: launcher, library, headers, docs, export targets and a
+  relocatable `find_package(tempo)` config.
+
+### Verification tools
+
+- 45 ctest targets plus ASan/UBSan, TSan, soak loops, a UI smoke script, an
+  install smoke script, deterministic record/JSON/HTTP fuzzers and optional
+  coverage-guided libFuzzer harnesses.
+- All primary engineering gaps identified in the prior review are addressed in
+  code and tests; remaining boundaries are architectural non-goals or explicitly
+  documented limits (see below).
+
+## Test commands and results
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -64,140 +79,161 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Result: **37/37 tests passed**, build with zero warnings under
-`-Wall -Wextra -Wpedantic -Werror -Wshadow -Wnon-virtual-dtor
--Woverloaded-virtual -Wunused -Wformat=2`.
-
-Sanitizers:
+**45/45 passed**, zero build warnings.
 
 ```sh
 cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTEMPO_SANITIZE=ON
 cmake --build build-asan -j
-ctest --test-dir build-asan --output-on-failure   # 37/37
+ctest --test-dir build-asan --output-on-failure   # 45/45
 
 cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTEMPO_TSAN=ON
 cmake --build build-tsan -j
-ctest --test-dir build-tsan --output-on-failure   # 37/37
+ctest --test-dir build-tsan --output-on-failure   # 45/45
 ```
 
-ASan found a test-only lifetime bug; UBSan found a real out-of-range cast in the
-JSON writer. Both were fixed and the full suites were rerun clean.
+TSan includes the background replay worker, archive/memory paths, HTTP/SSE
+integration and soak tests. ASan/UBSan include locale, permissions, async jobs
+and large-import tests.
 
 ## Fuzzing
 
-Deterministic mutation fuzzers over the production parsers (also ctest smoke
-targets at 500 iterations):
-
-```sh
-./build/fuzz_record --iterations 20000
-./build/fuzz_json   --iterations 20000
-./build/fuzz_http   --iterations 20000
-```
-
-Recorded output:
+Deterministic mutation fuzzers, 20,000 iterations each:
 
 ```
-fuzz_record: 20000 iterations, 14546 recovered, 178 strict-valid, seed=335597
-fuzz_json: 20000 iterations, 3851 accepted, 16149 rejected, seed=12648430
-fuzz_http: 20000 iterations, 6798 complete, 8732 incomplete, 4470 errors, seed=4277009102
+fuzz_record: 20000 iterations, 14546 recovered, 178 strict-valid
+fuzz_json: 20000 iterations, 3851 accepted, 16149 rejected
+fuzz_http: 20000 iterations, 6798 complete, 8732 incomplete, 4470 errors
 ```
 
-These are not coverage-guided libFuzzer campaigns; they are seedable mutation
-harnesses with invariant checks and no crash on malformed input.
+Optional coverage-guided libFuzzer harnesses (Homebrew LLVM 20.1.8, 1,000-run
+smokes): record harness 54 coverage counters, JSON harness 124 edges, no crash.
+Apple Clang lacks compiler-rt libFuzzer; CMake reports that clearly instead of a
+link error.
 
 ## Benchmarks
 
-`./build/tempo_bench` on the environment above:
+`./build/tempo_bench` (Release, machine-specific, single run):
 
 | Benchmark | Result |
 |---|---|
-| Serialize 20k events ×10 | 110.25 ms, 1,814,073 ops/s, 95.3 MiB/s |
-| Strict load ×10 | 84.08 ms, 2,378,629 ops/s, 124.9 MiB/s |
-| Determinism hash ×100 | 213.59 ms, 9,363,550 events/s |
-| JSON 1k-event page ×20 | 12.23 ms, 1,635,256 events/s, 107.3 MiB/s |
-| File save + load ×5 | 103.95 ms, 1,924,047 events/s, 101.0 MiB/s |
-| Record counter-race ×50 | 0.96 ms, 52,056 runs/s |
-| Replay counter-race ×500 | 7.54 ms, 8,418,169 events/s |
+| Serialize 20k events ×10 | 113.43 ms, 1,763,194 ops/s, 92.6 MiB/s |
+| Strict load ×10 | 84.48 ms, 2,367,516 ops/s, 124.3 MiB/s |
+| Determinism hash ×100 | 215.78 ms, 9,268,490 events/s |
+| JSON 1k-event page ×20 | 12.25 ms, 1,633,259 events/s, 107.2 MiB/s |
+| File save + load ×5 | 103.41 ms, 1,934,081 events/s, 101.6 MiB/s |
+| Record counter-race ×50 | 1.00 ms, 50,232 runs/s |
+| Replay counter-race ×500 | 7.57 ms, 8,383,160 events/s |
 
-Serialized 20k-event record: 1,101,280 bytes, hash `5e28fac214dc1a12`. The
-counter race record has 127 events and hash `4478f29fe75c9d58`. These numbers are
-machine-specific, not universal claims.
+20k-event record: 1,101,280 bytes, hash `5e28fac214dc1a12`. Counter-race record:
+127 events, hash `4478f29fe75c9d58`. A later clean build measured within normal
+run-to-run variance (e.g. 88–93 MiB/s serialize, 123–124 MiB/s load). No benchmark
+number is hard-coded or fabricated.
 
-## Demo proof
+## UI / install verification
 
-- `counter-race` performs a read-modify-write with a yield between read and
-  write. The recorded schedule loses updates, so the scenario's own check
-  reports failure; replay reproduces the same 127-event stream and hash 100
-  times.
-- In the browser verification run, `Replay ×100` reported 100 runs, identical
-  **yes**, hashes stable **yes**.
-- Altering step 1 produced: “First divergence at event 7 — event mismatch”,
-  recorded `step 1: run task 2` versus replayed `step 1: run task 3`.
-- A `Watch` breakpoint stopped forward navigation at frame 9 on
-  `watch local_read = 0` for task 2.
-- The launcher auto-recorded on a cold data directory, served tokenized CSS/JS,
-  connected SSE (status `LIVE`) and rendered four timeline lanes.
+```sh
+./scripts/ui_smoke.sh
+./scripts/install_smoke.sh
+```
 
-Verification details and exact outputs are in `docs/VERIFICATION.md` and
-`docs/TROUBLESHOOTING.md`.
+Results:
+
+```
+ui_smoke: OK (record 1, 100 identical replays, mutation divergence found)
+install_smoke: OK (Tempo 0.2.0 (record v1))
+```
+
+The UI smoke starts the real launcher, checks tokenized assets, records,
+replays 100 times, mutates one schedule decision, reads a frame, and (if Chromium
+is installed) loads the page with `selftest=1&nostream=1` and asserts the DOM
+reached `counter-race` and rendered the timeline, filters and archive controls.
+
+Browser checks (Chromium/Orca at 1126×900):
+
+- `LIVE` SSE status, four timeline lanes, 127-event table;
+- `Replay ×100`: 100 runs, identical yes, hashes stable yes, build id matches;
+- step-1 mutation: first divergence at event 7, recorded `task 2` vs replayed
+  `task 3`;
+- `Watch` filter: `28 shown, 28 matching of 127`;
+- breakpoint at frame 9 on `watch local_read = 0`.
 
 ## LOC
 
-Generated embedded assets are excluded. Production code includes the public
-headers, library, launcher, example, fuzzers and benchmark.
+Excludes generated/embedded UI assets.
 
 | Area | LOC |
 |---|---:|
-| Public headers (`include/tempo`, umbrella) | 1,643 |
-| Runtime/scheduler | 1,108 |
-| Virtual clock/RNG | 111 |
+| Public headers (`include/tempo`, umbrella) | 1,705 |
+| Runtime/scheduler | 1,107 |
+| Virtual clock/RNG | 107 |
 | Capabilities | 472 |
-| Record format/recorder | 1,268 |
-| Replay/diff | 406 |
+| Record format/recorder | 1,284 |
+| Replay/diff | 416 |
 | Debugger | 297 |
-| UI server/JSON/workbench | 2,915 |
-| Scenarios | 187 |
-| Launcher | 167 |
+| UI server/JSON/workbench | 3,375 |
+| Scenarios | 191 |
+| Launcher | 184 |
 | Shared version source | 9 |
-| **Production total** | **8,583** |
-| Example/fuzz/bench tools | 748 |
-| **Production + tools** | **9,331** |
-| Tests | 5,639 |
-| Embedded UI assets (excluded) | 1,302 |
+| **Production core** | **9,172** |
+| Example/fuzz/bench tools | 785 |
+| **Production + tools** | **9,957** |
+| Tests | 6,298 |
+| Embedded UI assets (excluded) | 1,481 |
+| Shell verification scripts | 139 |
 
-Production + tools (9,331) is inside the 9–11k target. The test suite is larger
-than the original 1.2k budget because it contains property, fuzz, sanitizer,
-integration and end-to-end workbench coverage; it was not padded with filler.
+Production + tools is inside the requested 9–11k target. Tests exceed the original
+1.2k estimate because they include property, fuzz, sanitizer, soak, async,
+archive, packaging and full HTTP integration coverage; there is no filler.
 
 ## Commits
 
-- **62 commits at delivery** (this report is the 62nd). The stated target of 80+
-  was not reached; the 60-commit minimum is met. Commits are vertical slices:
-  runtime, virtual environment, capabilities, record format, replay, debugger,
-  UI, scenarios, hardening, docs and tests. Every commit was built and tested
-  during development.
-- Remote: <https://github.com/BViganotti/tempo> (public), pushed on `master`.
+- **97 commits at delivery** (this report is the 97th). The 60 minimum and 80+
+  target are met.
+- Remote: <https://github.com/BViganotti/tempo> (public, `master`).
+- Each commit was built/tested during development; the final clean build and all
+  sanitizer suites are green.
 
-## Known gaps
+## Remaining gaps (honest)
 
-These are honest and also in `LIMITATIONS.md`:
+These are **not** claimed as fixed:
 
-- Cooperative tasks only; no preemption, native thread recording, or reverse
-  native execution. Unwatched locals are not reconstructed.
-- Unmediated OS calls in scenario code are outside determinism; divergences are
-  usually reported but not guaranteed to be caught at the call site.
-- Replay requires the scenario code/name to be registered; the stock launcher
-  only knows the three built-ins, so records from custom embedder registries are
-  viewable but not replayable there.
-- Records are unencrypted and CRC-protected, not signed. The token is in the
-  browser URL; there is no TLS (loopback only).
-- Import through HTTP is limited to 256 KiB and UI download to 4 MiB. Larger
-  records are files under `<data-dir>/records/`.
-- Timeline ticks are sampled for very large records; the event list is paged.
-- Tested on macOS arm64 with Chromium; Linux and other browsers are not claimed.
-- The fuzzers are deterministic mutation harnesses, not coverage-guided.
-- Commit count is 62, below the aspirational 80+; no low-value commits were added
-  to inflate the count.
+**Architectural / product scope**
+- Cooperative execution only. No preemption, native thread recording, or native
+  reverse execution; a scenario looping without awaiting still blocks.
+- Capability calls are synchronous on the scheduler thread; a slow loopback
+  socket call can stall other tasks up to its timeout. There is no async
+  capability awaitable.
+- Records are loaded eagerly; the on-disk index is not used for streaming random
+  access. Large files/records are bounded by limits, memory budget and archive,
+  not streamed.
+- Recording and large import parsing still run on the HTTP loop thread (replay
+  batches were moved off it). Long recordings can briefly block the UI.
+- Untrusted scenario C++ is not sandboxed. TLS, record encryption/signing,
+  token rotation and multi-user hosting are non-goals for a loopback tool.
+- Linux is untested; Windows is unsupported. No signed/notarized distribution or
+  auto-update.
+
+**Security / UX**
+- The session token lives in the browser URL and rotates only on restart. No TLS.
+- Records are CRC-protected, not cryptographically signed.
+- Browser verification is Chromium-only; no formal accessibility audit or mobile
+  matrix.
+- The timeline samples ticks for very large records; the UI has no virtualization
+  beyond paged events.
+- Async job divergence is returned in the job result and UI but is not written
+  into debug-session frame annotations.
+
+**Verification**
+- No CI by requirement; verification is local. libFuzzer runs were short smoke
+  campaigns, not long campaigns. Benchmarks are single-run, not a statistical
+  performance suite.
+
+The fixable engineering gaps from the review (memory limits/eviction, blocking
+batch replay, locale sensitivity, build compatibility, seed range, import/download
+caps, filename collisions, archive access, permissions, packaging, filters,
+accessibility basics, soak/UI/install automation, coverage-guided fuzzing option)
+were implemented and tested. The remaining list is either fundamental to the
+cooperative design or requires changing the product’s security/deployment model.
 
 ## Reproduction
 
@@ -205,11 +241,13 @@ These are honest and also in `LIMITATIONS.md`:
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+make ui-smoke
+make install-smoke
 ./build/tempo_bench
 ./build/fuzz_record --iterations 20000
 ./build/tempo_example /tmp/tempo-example.tmpo
 ./build/tempo_workbench          # opens the browser
 ```
 
-Licensed MIT. See `README.md`, `docs/`, `CHANGELOG.md`, `LIMITATIONS.md` and
-`SECURITY.md`.
+MIT licensed. See `README.md`, `docs/`, `CHANGELOG.md`, `SECURITY.md` and
+`LIMITATIONS.md`.

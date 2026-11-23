@@ -43,7 +43,10 @@ registry.add(tempo::ScenarioInfo{
 ```
 
 Names must be non-empty, ≤128 bytes, unique, and the entry must be callable.
-`ScenarioRegistry::builtins()` is immutable and used by the stock workbench. A
+`ScenarioInfo::build_id` is optional; built-ins use the SHA-256 of the scenario
+sources generated at configure time. Records stamp it and replay warns when the
+registered scenario’s build id differs. `ScenarioRegistry::builtins()` is
+immutable and used by the stock workbench. A
 custom embedder can build its own registry and drive `record_run`/`replay_record`
 directly; the stock launcher only knows the built-ins. Record files from custom
 scenarios remain inspectable but the stock launcher reports that the scenario is

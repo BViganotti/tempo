@@ -42,7 +42,9 @@ is rejected before parsing.
 
 `count:u32`, then each field as `key_len:u32`, `key`, `value_len:u32`, `value`.
 All strings are UTF-8 by convention. Known keys are `scenario`, `tool`, `seed`,
-`created`, `start_ns`. Unknown keys are preserved in `RecordMeta::attributes`.
+`created`, `start_ns`. Build fingerprints, mutation parameters and editor notes
+are stored as additional attributes (for example `build_id`); unknown keys are
+preserved in `RecordMeta::attributes`.
 Limits: 64 fields, key ≤ 64 bytes, value ≤ 4,096 bytes, total ≤ 64 KiB.
 
 ### 2. String table

@@ -31,13 +31,28 @@ Use `--port 0` (ephemeral) or pick another port. Tempo only binds
 
 ## Import is rejected
 
-- The HTTP body limit for imports is 256 KiB. Copy larger `.tmpo` files directly
-  into `<data-dir>/records/` and restart the workbench.
+- The HTTP body limit for imports is 64 MiB, aligned with the record file cap.
+  Copy larger `.tmpo` files directly into `<data-dir>/records/` and reload the
+  workbench; they will appear in the archive if they do not fit memory.
 - Imports must be strict, complete, CRC-valid records. Truncated files can be
   inspected only when loaded from the records directory in recovery mode.
 - Sending `Content-Type: application/json` to `/api/records/import` returns 415;
   imports use `application/octet-stream`.
 - Importing the same record twice is idempotent and reports `duplicate: true`.
+
+## A long replay freezes the page
+
+Batch replays (`Replay ×100`) normally run on the background job worker. If the
+worker is unavailable, the request is rejected; single replays are synchronous.
+A job queue holds at most 16 queued/retained jobs; let existing jobs finish or
+restart the workbench. Recording and imports remain synchronous and can briefly
+block the UI for very large inputs.
+
+## Replay warns about a build mismatch
+
+The record was written by a different scenario build. The replay still runs so
+you can inspect the divergence; use the matching checkout or re-record if you
+need a trusted comparison.
 
 ## Replay diverges immediately
 
@@ -69,13 +84,15 @@ evicted from the 16-record memory cap (the file may still exist in `records/`).
 
 ## The UI shows fewer than 16 records after restart
 
-The workbench loads the newest 16 record files. Older files remain on disk; move
-or copy them to another data directory if you need them, or remove newer files
-and restart.
+The workbench loads up to 16 records within its memory budget. Records that do
+not fit are listed under the Records panel’s archive selector; choose one and
+press **Load**. Files remain under `<data-dir>/records/`. If the archive selector
+is empty, the file was not a valid `.tmpo` or was beyond the 512-file startup
+scan cap.
 
 ## A record download says 413
 
-Downloading through the UI is capped at 4 MiB. The full `.tmpo` remains under
+Downloads are capped at 64 MiB (the record file cap). A larger file remains under
 `<data-dir>/records/`; copy it directly.
 
 ## Sanitizer build fails or reports an error

@@ -185,5 +185,27 @@ if(BUILD_TESTING)
   tempo_add_test(socket_capability_test)
 endif()
 
-install(TARGETS tempo ARCHIVE DESTINATION lib)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS tempo EXPORT tempoTargets ARCHIVE DESTINATION lib)
+install(TARGETS tempo_workbench RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
+install(FILES LICENSE README.md CHANGELOG.md LIMITATIONS.md FINAL_REPORT.md
+  DESTINATION share/doc/tempo)
+install(DIRECTORY docs/ DESTINATION share/doc/tempo/docs)
+install(EXPORT tempoTargets
+  NAMESPACE tempo::
+  FILE tempoTargets.cmake
+  DESTINATION lib/cmake/tempo)
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tempoConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/tempoConfig.cmake
+  INSTALL_DESTINATION lib/cmake/tempo)
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/tempoConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/tempoConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/tempoConfigVersion.cmake
+  DESTINATION lib/cmake/tempo)

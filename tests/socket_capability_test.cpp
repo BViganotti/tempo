@@ -9,6 +9,8 @@
 #include <thread>
 
 #include "test_util.hpp"
+#include "tempo/record_run.hpp"
+#include "tempo/replay.hpp"
 #include "tempo/runtime.hpp"
 #include "tempo/system.hpp"
 
@@ -143,6 +145,26 @@ TEST(loopback_socket_echoes_through_capability) {
   CHECK(connected);
   CHECK(closed);
   CHECK_EQ(echo, std::string("ping"));
+}
+
+TEST(recorded_socket_traffic_replays_after_the_server_is_gone) {
+  std::uint16_t port = 0;
+  RecordRunResult recorded;
+  {
+    EchoServer server;
+    CHECK(server.ok());
+    port = server.port();
+    SystemHost host(SystemCapabilityOptions{});
+    auto entry = [port](Context ctx) { return echo_scenario(ctx, port); };
+    recorded = record_run("echo", entry, host);
+    CHECK(recorded.ok);
+  }
+  // The server and its accept thread are gone; replay must answer from the
+  // record without opening a socket.
+  auto entry = [port](Context ctx) { return echo_scenario(ctx, port); };
+  const ReplayReport replay = replay_record(recorded.record, entry);
+  CHECK(replay.ok);
+  CHECK(replay.identical);
 }
 
 TEST(socket_errors_are_reported_not_fatal) {

@@ -75,6 +75,8 @@ if(BUILD_TESTING)
   tempo_add_test(version_test)
   tempo_add_test(rng_test)
   tempo_add_test(clock_test)
+  tempo_add_test(task_test)
+  tempo_add_test(scheduler_test)
 endif()
 
 install(TARGETS tempo ARCHIVE DESTINATION lib)

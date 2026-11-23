@@ -122,6 +122,31 @@ void tighten_file(const std::filesystem::path& path) noexcept {
                                std::filesystem::perm_options::replace, ec);
 }
 
+Value safe_u64(std::uint64_t value) {
+  if (value <= 9'007'199'254'740'991ull) {
+    return Value(value);
+  }
+  return Value(std::to_string(value));
+}
+
+bool read_json_uint(const Value* value, std::uint64_t& out) {
+  if (value == nullptr) {
+    return false;
+  }
+  if (value->is_number()) {
+    const std::int64_t parsed = value->as_i64(-1);
+    if (parsed < 0) {
+      return false;
+    }
+    out = static_cast<std::uint64_t>(parsed);
+    return true;
+  }
+  if (value->is_string()) {
+    return parse_u64(value->as_string(), out);
+  }
+  return false;
+}
+
 std::string slugify(std::string_view name) {
   std::string out;
   for (char c : name) {
@@ -392,7 +417,7 @@ Value Workbench::record_json(const StoredRecord& stored) const {
   }
   const Record& record = *stored.record;
   value["scenario"] = jstr(record.meta.scenario);
-  value["seed"] = number(record.meta.seed);
+  value["seed"] = safe_u64(record.meta.seed);
   value["events"] = number(static_cast<std::uint64_t>(record.events.size()));
   value["hash"] = jstr(record.hash_hex());
   value["hashShort"] = jstr(hash_short(record));
@@ -457,12 +482,7 @@ Value Workbench::overview_json() const {
 Value Workbench::event_json(std::size_t index, const Event& event) const {
   // JSON numbers are IEEE doubles here. Values above 2^53 (notably 64-bit RNG
   // draws) would lose precision, so they are rendered as decimal strings.
-  auto safe_number = [](std::uint64_t value) {
-    if (value <= 9'007'199'254'740'991ull) {
-      return Value(value);
-    }
-    return Value(std::to_string(value));
-  };
+  auto safe_number = [](std::uint64_t value) { return safe_u64(value); };
   Value value = Value::object();
   value["i"] = number(static_cast<std::uint64_t>(index));
   value["type"] = jstr(event_type_name(event.type));
@@ -670,24 +690,20 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
     }
     std::uint64_t seed = 7;
     if (const Value* seed_value = body.value.find("seed"); seed_value != nullptr) {
-      const std::int64_t parsed = seed_value->as_i64(-1);
-      if (!seed_value->is_number() || parsed < 0) {
-        return error_response(400, "seed must be a non-negative integer");
+      if (!read_json_uint(seed_value, seed)) {
+        return error_response(400, "seed must be a non-negative integer or decimal string");
       }
-      seed = static_cast<std::uint64_t>(parsed);
     }
     std::uint64_t mutate_step = kNoMutation;
     std::uint32_t mutate_choice = 0;
     if (const Value* mutate = body.value.find("mutateStep"); mutate != nullptr) {
-      const std::int64_t parsed = mutate->as_i64(-1);
-      if (!mutate->is_number() || parsed < 0) {
-        return error_response(400, "mutateStep must be a non-negative integer");
+      if (!read_json_uint(mutate, mutate_step)) {
+        return error_response(400, "mutateStep must be a non-negative integer or string");
       }
-      mutate_step = static_cast<std::uint64_t>(parsed);
       if (const Value* choice = body.value.find("mutateChoice"); choice != nullptr) {
-        const std::int64_t parsed_choice = choice->as_i64(-1);
-        if (!choice->is_number() || parsed_choice < 0) {
-          return error_response(400, "mutateChoice must be a non-negative integer");
+        std::uint64_t parsed_choice = 0;
+        if (!read_json_uint(choice, parsed_choice) || parsed_choice > UINT32_MAX) {
+          return error_response(400, "mutateChoice must be a 32-bit non-negative integer");
         }
         mutate_choice = static_cast<std::uint32_t>(parsed_choice);
       }
@@ -1203,7 +1219,7 @@ bool Workbench::save_record_file(StoredRecord& stored, std::string* warning) {
   std::snprintf(created, sizeof(created), "%010llu",
                 static_cast<unsigned long long>(stored.created_unix));
   const std::string filename = std::string("rec-") + created + "-" +
-                               record.hash_hex().substr(0, 8) + "-" +
+                               record.hash_hex() + "-" +
                                slugify(record.meta.scenario) + ".tmpo";
   const std::filesystem::path path = records_dir / filename;
   if (std::filesystem::exists(path, ec)) {

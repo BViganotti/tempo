@@ -228,7 +228,16 @@ Workbench::Workbench(WorkbenchOptions options) : options_(std::move(options)) {
   }
 }
 
-Workbench::~Workbench() = default;
+Workbench::~Workbench() {
+  {
+    std::lock_guard<std::mutex> lock(jobs_mutex_);
+    worker_stop_ = true;
+  }
+  jobs_cv_.notify_all();
+  if (worker_.joinable()) {
+    worker_.join();
+  }
+}
 
 bool Workbench::initialize(std::string* error) {
   if (initialized_) {
@@ -536,7 +545,8 @@ Value Workbench::breakpoints_json() const {
   return value;
 }
 
-Value Workbench::replay_json(RecordId id, const ReplayOutcome& outcome, std::uint32_t runs,
+Value Workbench::replay_json(RecordId id, const std::shared_ptr<const Record>& record,
+                             const ReplayOutcome& outcome, std::uint32_t runs,
                              ReplayOptions options) const {
   Value value = Value::object();
   value["ok"] = Value(outcome.ok);
@@ -550,7 +560,6 @@ Value Workbench::replay_json(RecordId id, const ReplayOutcome& outcome, std::uin
   if (!outcome.error.empty()) {
     value["error"] = jstr(outcome.error);
   }
-  std::shared_ptr<const Record> record = get_record(id);
   value["expectedHash"] = jstr(record ? record->hash_hex() : std::string());
   value["recordedEvents"] =
       number(record ? static_cast<std::uint64_t>(record->events.size()) : 0);
@@ -768,8 +777,22 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
         options.mutate_choice = static_cast<std::uint32_t>(parsed_choice);
       }
     }
+    const Value* async_value = body.value.find("async");
+    const bool async = async_value != nullptr && async_value->is_bool() && async_value->as_bool();
+    if (async) {
+      AsyncJobOutcome queued = enqueue_replay(static_cast<RecordId>(id_number), runs, options);
+      if (!queued.ok) {
+        return error_response(400, queued.error);
+      }
+      Value result = Value::object();
+      result["ok"] = Value(true);
+      result["jobId"] = number(queued.job_id);
+      result["status"] = jstr("queued");
+      return json_response(result, 202);
+    }
     ReplayOutcome outcome = replay(static_cast<RecordId>(id_number), runs, options);
-    Value result = replay_json(static_cast<RecordId>(id_number), outcome, runs, options);
+    std::shared_ptr<const Record> record = get_record(static_cast<RecordId>(id_number));
+    Value result = replay_json(static_cast<RecordId>(id_number), record, outcome, runs, options);
     return json_response(result, outcome.ok ? 200 : 400);
   }
 
@@ -855,6 +878,23 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
       }
     }
     return error_response(404, "unknown breakpoint endpoint");
+  }
+
+  if (!parts.empty() && parts[0] == "jobs") {
+    if (request.method != "GET") return error_response(405, "method not allowed");
+    if (parts.size() == 1) {
+      return json_response(jobs_json());
+    }
+    if (parts.size() == 2) {
+      std::uint64_t job_id = 0;
+      if (!parse_u64(parts[1], job_id) || job_id == 0) {
+        return error_response(400, "invalid job id");
+      }
+      std::optional<json::Value> status = job_status(job_id);
+      if (!status.has_value()) return error_response(404, "job not found");
+      return json_response(std::move(*status));
+    }
+    return error_response(404, "unknown job endpoint");
   }
 
   if (parts.size() >= 2 && parts[0] == "records") {
@@ -1275,16 +1315,47 @@ bool Workbench::prepare_fixtures(const ScenarioInfo& scenario, std::string* erro
   return true;
 }
 
-Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
-                                           ReplayOptions options) {
-  ReplayOutcome outcome;
-  std::shared_ptr<const Record> record = get_record(id);
+namespace {
+Workbench::ReplayOutcome execute_replay(const std::shared_ptr<const Record>& record,
+                                        const ScenarioInfo& scenario, std::uint32_t runs,
+                                        ReplayOptions options) {
+  Workbench::ReplayOutcome outcome;
   if (!record) {
     outcome.error = "record not found";
     return outcome;
   }
   if (!record->complete) {
     outcome.error = "cannot replay an incomplete record";
+    return outcome;
+  }
+  if (options.expected_build_id.empty()) {
+    options.expected_build_id = scenario.build_id;
+  }
+  const std::uint32_t capped = std::clamp<std::uint32_t>(runs, 1, limits::kMaxReplayRuns);
+  const auto start = std::chrono::steady_clock::now();
+  if (capped > 1) {
+    outcome.batch = true;
+    outcome.multi = replay_many(*record, scenario.entry, capped, options);
+    outcome.ok = outcome.multi.ok;
+    outcome.error = outcome.multi.error;
+  } else {
+    outcome.single = replay_record(*record, scenario.entry, options);
+    outcome.ok = outcome.single.ok;
+    outcome.error = outcome.single.error;
+  }
+  const auto end = std::chrono::steady_clock::now();
+  outcome.elapsed_ns = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
+  return outcome;
+}
+}  // namespace
+
+Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
+                                           ReplayOptions options) {
+  ReplayOutcome outcome;
+  std::shared_ptr<const Record> record = get_record(id);
+  if (!record) {
+    outcome.error = "record not found";
     return outcome;
   }
   const ScenarioInfo* scenario = find_scenario(record->meta.scenario);
@@ -1296,23 +1367,8 @@ Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
     options.expected_build_id = scenario->build_id;
   }
   const std::uint32_t capped = std::clamp<std::uint32_t>(runs, 1, limits::kMaxReplayRuns);
-  if (capped > 1) {
-    const auto start = std::chrono::steady_clock::now();
-    outcome.batch = true;
-    outcome.multi = replay_many(*record, scenario->entry, capped, options);
-    outcome.ok = outcome.multi.ok;
-    outcome.error = outcome.multi.error;
-    const auto end = std::chrono::steady_clock::now();
-    outcome.elapsed_ns = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
-  } else {
-    const auto start = std::chrono::steady_clock::now();
-    outcome.single = replay_record(*record, scenario->entry, options);
-    const auto end = std::chrono::steady_clock::now();
-    outcome.elapsed_ns = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
-    outcome.ok = outcome.single.ok;
-    outcome.error = outcome.single.error;
+  outcome = execute_replay(record, *scenario, capped, options);
+  if (!outcome.batch) {
     if (DebugSession* session = session_for(id, false); session != nullptr) {
       if (outcome.single.first_divergence.found) {
         session->set_divergence(outcome.single.first_divergence.index,
@@ -1322,11 +1378,143 @@ Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
       }
     }
   }
-  json::Value payload = replay_json(id, outcome, capped, options);
+  json::Value payload = replay_json(id, record, outcome, capped, options);
   if (broadcaster_) {
     broadcaster_("replay", payload.dump());
   }
   return outcome;
+}
+
+void Workbench::start_worker_locked() {
+  if (!worker_.joinable()) {
+    worker_ = std::thread([this] { worker_loop(); });
+  }
+}
+
+void Workbench::worker_loop() {
+  for (;;) {
+    std::uint64_t job_id = 0;
+    ReplayJob job;
+    {
+      std::unique_lock<std::mutex> lock(jobs_mutex_);
+      jobs_cv_.wait(lock, [this] { return worker_stop_ || !job_queue_.empty(); });
+      if (worker_stop_ && job_queue_.empty()) {
+        return;
+      }
+      job_id = job_queue_.front();
+      job_queue_.pop_front();
+      auto it = jobs_.find(job_id);
+      if (it == jobs_.end()) {
+        continue;
+      }
+      it->second.status = "running";
+      job = it->second;
+    }
+    const ScenarioInfo* scenario = find_scenario(job.record ? job.record->meta.scenario
+                                                            : std::string());
+    ReplayOutcome outcome;
+    if (scenario == nullptr) {
+      outcome.error = "scenario is not registered";
+    } else {
+      outcome = execute_replay(job.record, *scenario, job.runs, job.options);
+    }
+    {
+      std::lock_guard<std::mutex> lock(jobs_mutex_);
+      auto it = jobs_.find(job_id);
+      if (it != jobs_.end()) {
+        it->second.outcome = std::move(outcome);
+        it->second.status = it->second.outcome.ok ? "done" : "error";
+        if (!it->second.outcome.ok) {
+          it->second.error = it->second.outcome.error.empty()
+                                 ? std::string("replay failed")
+                                 : it->second.outcome.error;
+        }
+      }
+    }
+  }
+}
+
+Workbench::AsyncJobOutcome Workbench::enqueue_replay(RecordId id, std::uint32_t runs,
+                                                     ReplayOptions options) {
+  AsyncJobOutcome result;
+  std::shared_ptr<const Record> record = get_record(id);
+  if (!record) {
+    result.error = "record not found";
+    return result;
+  }
+  if (!record->complete) {
+    result.error = "cannot replay an incomplete record";
+    return result;
+  }
+  const ScenarioInfo* scenario = find_scenario(record->meta.scenario);
+  if (scenario == nullptr) {
+    result.error = "scenario is not registered: " + record->meta.scenario;
+    return result;
+  }
+  if (options.expected_build_id.empty()) {
+    options.expected_build_id = scenario->build_id;
+  }
+  std::lock_guard<std::mutex> lock(jobs_mutex_);
+  if (jobs_.size() >= 16) {
+    for (auto it = jobs_.begin(); it != jobs_.end();) {
+      if (it->second.status == "done" || it->second.status == "error") {
+        it = jobs_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  if (jobs_.size() + job_queue_.size() >= 16) {
+    result.error = "replay job queue is full";
+    return result;
+  }
+  ReplayJob job;
+  const std::uint64_t job_id = next_job_id_++;
+  job.id = job_id;
+  job.status = "queued";
+  job.record = record;
+  job.options = options;
+  job.runs = std::clamp<std::uint32_t>(runs, 1, limits::kMaxReplayRuns);
+  jobs_.emplace(job_id, std::move(job));
+  job_queue_.push_back(job_id);
+  start_worker_locked();
+  jobs_cv_.notify_all();
+  result.ok = true;
+  result.job_id = job_id;
+  return result;
+}
+
+std::optional<json::Value> Workbench::job_status(std::uint64_t job_id) {
+  std::lock_guard<std::mutex> lock(jobs_mutex_);
+  auto it = jobs_.find(job_id);
+  if (it == jobs_.end()) {
+    return std::nullopt;
+  }
+  const ReplayJob& job = it->second;
+  Value value = Value::object();
+  value["id"] = number(job_id);
+  value["status"] = jstr(job.status);
+  value["runs"] = number(job.runs);
+  if (job.status == "done" || job.status == "error") {
+    value["result"] = replay_json(job.id, job.record, job.outcome, job.runs, job.options);
+    if (!job.error.empty()) {
+      value["error"] = jstr(job.error);
+    }
+  }
+  return value;
+}
+
+json::Value Workbench::jobs_json() {
+  std::lock_guard<std::mutex> lock(jobs_mutex_);
+  Value value = Value::array();
+  for (const auto& [id, job] : jobs_) {
+    Value item = Value::object();
+    item["id"] = number(id);
+    item["status"] = jstr(job.status);
+    item["runs"] = number(job.runs);
+    value.push(std::move(item));
+  }
+  return value;
 }
 
 std::shared_ptr<const Record> Workbench::get_record(RecordId id) const {

@@ -1,11 +1,15 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <string_view>
 #include <vector>
 
@@ -99,6 +103,18 @@ class Workbench {
   };
   ReplayOutcome replay(RecordId id, std::uint32_t runs, ReplayOptions options = {});
 
+  struct AsyncJobOutcome {
+    bool ok = false;
+    std::uint64_t job_id = 0;
+    std::string error;
+  };
+  /// Queue a replay on the single background job worker and return immediately.
+  /// Long batches no longer block the HTTP/SSE loop.
+  AsyncJobOutcome enqueue_replay(RecordId id, std::uint32_t runs, ReplayOptions options = {});
+  /// JSON status/result for a job, or null when unknown.
+  std::optional<json::Value> job_status(std::uint64_t job_id);
+  json::Value jobs_json();
+
   struct ImportOutcome {
     bool ok = false;
     bool duplicate = false;
@@ -130,8 +146,20 @@ class Workbench {
   json::Value state_json(const WatchMap& state) const;
   json::Value summary_json(const RunSummary& summary) const;
   json::Value breakpoints_json() const;
-  json::Value replay_json(RecordId id, const ReplayOutcome& outcome,
-                          std::uint32_t runs, ReplayOptions options) const;
+  json::Value replay_json(RecordId id, const std::shared_ptr<const Record>& record,
+                          const ReplayOutcome& outcome, std::uint32_t runs,
+                          ReplayOptions options) const;
+  void start_worker_locked();
+  void worker_loop();
+  struct ReplayJob {
+    std::uint64_t id = 0;
+    std::string status = "queued";
+    ReplayOutcome outcome;
+    std::shared_ptr<const Record> record;
+    ReplayOptions options;
+    std::uint32_t runs = 1;
+    std::string error;
+  };
   HttpResponse static_response(std::string_view path) const;
 
   RecordId add_record(Record record, RunSummary summary);
@@ -153,6 +181,14 @@ class Workbench {
   std::size_t used_bytes_ = 0;
   std::function<void(std::string_view, std::string_view)> broadcaster_;
   std::string session_token_;
+
+  std::mutex jobs_mutex_;
+  std::condition_variable jobs_cv_;
+  std::deque<std::uint64_t> job_queue_;
+  std::map<std::uint64_t, ReplayJob> jobs_;
+  std::uint64_t next_job_id_ = 1;
+  bool worker_stop_ = false;
+  std::thread worker_;
 };
 
 /// Default workbench data directory for this platform.

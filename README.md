@@ -121,7 +121,7 @@ docs/            architecture, API, format, debugger, security, testing
 
 ## Verification
 
-The repository contains 31 ctest targets plus ASan/UBSan and TSan builds,
+The repository contains 37 ctest targets plus ASan/UBSan and TSan builds,
 deterministic mutation fuzzers for records/JSON/HTTP, and measured benchmarks.
 `FINAL_REPORT.md` records LOC, commit count, test commands/results, benchmark
 numbers and known gaps. `CHANGELOG.md` tracks the work.

@@ -33,6 +33,12 @@ find_package(Threads REQUIRED)
 
 add_library(tempo STATIC
   src/version.cpp
+  src/runtime/task.cpp
+  src/runtime/context.cpp
+  src/runtime/scheduler.cpp
+  src/virtual/rng.cpp
+  src/virtual/clock.cpp
+  src/record/event.cpp
 )
 target_include_directories(tempo PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -67,6 +73,8 @@ endfunction()
 
 if(BUILD_TESTING)
   tempo_add_test(version_test)
+  tempo_add_test(rng_test)
+  tempo_add_test(clock_test)
 endif()
 
 install(TARGETS tempo ARCHIVE DESTINATION lib)

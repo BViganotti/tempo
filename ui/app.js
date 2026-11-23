@@ -593,6 +593,24 @@
     }
   }
 
+  async function applyReplayResult(data, runs) {
+    state.lastReplay = data;
+    renderReplay(data);
+    if (data.divergence && data.divergence.found) {
+      state.divergence = data.divergence;
+      renderDivergence(data.divergence);
+      await setIndex(data.divergence.index);
+      toast("Divergence at event " + data.divergence.index + ": " + data.divergence.reason);
+    } else {
+      state.divergence = null;
+      renderDivergence(null);
+      toast(data.allIdentical
+        ? (runs > 1 ? runs + " replays are bit-identical." : "Replay is bit-identical.")
+        : "Replay completed with a mismatch.", !data.allIdentical);
+    }
+    setStatus("live", "live");
+  }
+
   async function runReplay(runs, mutateStep, mutateChoice) {
     if (!state.current) { toast("Record or select a run first.", true); return; }
     setStatus("replaying", "busy");
@@ -602,22 +620,25 @@
         body.mutateStep = mutateStep;
         body.mutateChoice = mutateChoice || 0;
       }
-      const data = await api("/api/replay", { method: "POST", body: JSON.stringify(body) });
-      state.lastReplay = data;
-      renderReplay(data);
-      if (data.divergence && data.divergence.found) {
-        state.divergence = data.divergence;
-        renderDivergence(data.divergence);
-        await setIndex(data.divergence.index);
-        toast("Divergence at event " + data.divergence.index + ": " + data.divergence.reason);
-      } else {
-        state.divergence = null;
-        renderDivergence(null);
-        toast(data.allIdentical
-          ? (runs > 1 ? runs + " replays are bit-identical." : "Replay is bit-identical.")
-          : "Replay completed with a mismatch.", !data.allIdentical);
+      if (runs > 1) {
+        body.async = true;
+        const queued = await api("/api/replay", { method: "POST", body: JSON.stringify(body) });
+        if (!queued.jobId) throw new Error("server did not return a job id");
+        for (let attempt = 0; attempt < 600; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const job = await api("/api/jobs/" + queued.jobId);
+          if (job.status === "done") {
+            await applyReplayResult(job.result, runs);
+            return;
+          }
+          if (job.status === "error") {
+            throw new Error(job.error || "background replay failed");
+          }
+        }
+        throw new Error("background replay timed out");
       }
-      setStatus("live", "live");
+      const data = await api("/api/replay", { method: "POST", body: JSON.stringify(body) });
+      await applyReplayResult(data, runs);
     } catch (error) {
       setStatus("error", "error");
       toast("Replay failed: " + error.message, true);

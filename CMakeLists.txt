@@ -47,6 +47,7 @@ add_library(tempo STATIC
   src/record/record_run.cpp
   src/replay/replay.cpp
   src/replay/diff.cpp
+  src/debug/debug.cpp
 )
 target_include_directories(tempo PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -93,6 +94,8 @@ if(BUILD_TESTING)
   tempo_add_test(replay_test)
   tempo_add_test(mutation_test)
   tempo_add_test(diff_test)
+  tempo_add_test(debug_test)
+  tempo_add_test(breakpoint_test)
   tempo_add_test(task_test)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)

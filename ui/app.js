@@ -190,7 +190,8 @@
       ["Elapsed", fmtMs(result.elapsedNs), ""],
       ["Recorded events", String(result.recordedEvents), ""],
       ["Replayed events", String(result.replayedEvents), ""],
-      ["First failing run", result.failedRun >= 0 ? "#" + (result.failedRun + 1) : "—", result.failedRun >= 0 ? "bad" : ""]
+      ["First failing run", result.failedRun >= 0 ? "#" + (result.failedRun + 1) : "—", result.failedRun >= 0 ? "bad" : ""],
+      ["Build id", result.buildMismatch ? "mismatch" : "matches", result.buildMismatch ? "bad" : "ok"]
     ];
     for (const [key, value, cls] of stats) {
       const card = el("div", "stat");
@@ -199,7 +200,8 @@
       box.appendChild(card);
     }
     $("replay-note").textContent = result.error ? result.error :
-      (result.allIdentical ? "100% event-identical replay" : "event stream diverged");
+      (result.buildWarning ? result.buildWarning :
+        (result.allIdentical ? "100% event-identical replay" : "event stream diverged"));
     if (result.error) {
       const card = el("div", "stat");
       card.appendChild(el("div", "k", "Error"));

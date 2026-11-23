@@ -38,6 +38,7 @@ add_library(tempo STATIC
   src/runtime/scheduler.cpp
   src/virtual/rng.cpp
   src/virtual/clock.cpp
+  src/capability/system_capability.cpp
   src/record/event.cpp
 )
 target_include_directories(tempo PUBLIC
@@ -79,6 +80,8 @@ if(BUILD_TESTING)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)
   tempo_add_test(capability_test)
+  tempo_add_test(system_capability_test)
+  tempo_add_test(socket_capability_test)
 endif()
 
 install(TARGETS tempo ARCHIVE DESTINATION lib)

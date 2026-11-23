@@ -92,6 +92,19 @@ class Workbench {
   };
   ReplayOutcome replay(RecordId id, std::uint32_t runs, ReplayOptions options = {});
 
+  struct ImportOutcome {
+    bool ok = false;
+    bool duplicate = false;
+    RecordId id = 0;
+    std::string error;
+    std::shared_ptr<const Record> record;
+  };
+  /// Import a strict, complete record container. Idempotent by hash.
+  ImportOutcome import_record(std::string_view bytes);
+
+  /// Remove a record from memory and, when `delete_file` is set, from disk.
+  bool delete_record(RecordId id, bool delete_file, std::string* error);
+
   std::shared_ptr<const Record> get_record(RecordId id) const;
   std::vector<StoredRecord> records() const;
 
@@ -115,7 +128,7 @@ class Workbench {
   HttpResponse static_response(std::string_view path) const;
 
   RecordId add_record(Record record, RunSummary summary);
-  bool save_record_file(const StoredRecord& stored, std::string* warning);
+  bool save_record_file(StoredRecord& stored, std::string* warning);
   bool prepare_fixtures(const ScenarioInfo& scenario, std::string* error);
   void apply_breakpoints(DebugSession& session);
   void broadcast_overview();

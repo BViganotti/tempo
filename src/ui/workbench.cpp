@@ -564,6 +564,37 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
     return json_response(overview_json());
   }
 
+  if (parts.size() == 1 && parts[0] == "health") {
+    if (request.method != "GET") return error_response(405, "method not allowed");
+    Value result = Value::object();
+    result["ok"] = Value(true);
+    result["version"] = jstr(kVersion);
+    result["initialized"] = Value(initialized_);
+    result["records"] = number(static_cast<std::uint64_t>(records_.size()));
+    return json_response(result);
+  }
+
+  if (parts.size() == 2 && parts[0] == "records" && parts[1] == "import") {
+    if (request.method != "POST") return error_response(405, "method not allowed");
+    if (request.body.size() > limits::kMaxHttpBodyBytes) {
+      return error_response(413, "imported record exceeds the 256 KiB HTTP body limit");
+    }
+    ImportOutcome outcome = import_record(request.body);
+    Value result = Value::object();
+    result["ok"] = Value(outcome.ok);
+    result["duplicate"] = Value(outcome.duplicate);
+    if (outcome.record) {
+      for (const auto& stored : records_) {
+        if (stored.id == outcome.id) {
+          result["record"] = record_json(stored);
+          break;
+        }
+      }
+    }
+    if (!outcome.error.empty()) result["error"] = jstr(outcome.error);
+    return json_response(result, outcome.ok ? 200 : 400);
+  }
+
   if (parts.size() == 1 && parts[0] == "record") {
     if (request.method != "POST") return error_response(405, "method not allowed");
     const json::ParseOutcome body = json::parse(request.body);
@@ -781,6 +812,29 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
         events.push(event_json(i, record->events[i]));
       }
       result["events"] = std::move(events);
+      return json_response(result);
+    }
+
+    if (parts.size() == 3 && parts[2] == "delete") {
+      if (request.method != "POST") return error_response(405, "method not allowed");
+      bool delete_file = true;
+      if (!request.body.empty()) {
+        const json::ParseOutcome body = json::parse(request.body);
+        if (body.ok && body.value.is_object()) {
+          if (const Value* flag = body.value.find("deleteFile"); flag != nullptr) {
+            if (!flag->is_bool()) return error_response(400, "deleteFile must be a boolean");
+            delete_file = flag->as_bool();
+          }
+        }
+      }
+      std::string delete_error;
+      if (!delete_record(id, delete_file, &delete_error)) {
+        return error_response(delete_error == "record not found" ? 404 : 500, delete_error);
+      }
+      Value result = Value::object();
+      result["ok"] = Value(true);
+      result["deleted"] = number(id);
+      result["fileDeleted"] = Value(delete_file);
       return json_response(result);
     }
 
@@ -1021,7 +1075,7 @@ RecordId Workbench::add_record(Record record, RunSummary summary) {
   return stored.id;
 }
 
-bool Workbench::save_record_file(const StoredRecord& stored, std::string* warning) {
+bool Workbench::save_record_file(StoredRecord& stored, std::string* warning) {
   if (!stored.record) {
     if (warning) *warning = "cannot save a null record";
     return false;
@@ -1043,6 +1097,7 @@ bool Workbench::save_record_file(const StoredRecord& stored, std::string* warnin
                                slugify(record.meta.scenario) + ".tmpo";
   const std::filesystem::path path = records_dir / filename;
   if (std::filesystem::exists(path, ec)) {
+    stored.file = path.string();
     return true;
   }
   std::string error;
@@ -1050,6 +1105,7 @@ bool Workbench::save_record_file(const StoredRecord& stored, std::string* warnin
     if (warning) *warning = "save failed: " + error;
     return false;
   }
+  stored.file = path.string();
   return true;
 }
 
@@ -1147,6 +1203,70 @@ std::shared_ptr<const Record> Workbench::get_record(RecordId id) const {
 
 std::vector<StoredRecord> Workbench::records() const {
   return records_;
+}
+
+Workbench::ImportOutcome Workbench::import_record(std::string_view bytes) {
+  ImportOutcome outcome;
+  if (!initialized_) {
+    outcome.error = "workbench is not initialized";
+    return outcome;
+  }
+  if (bytes.empty()) {
+    outcome.error = "empty record";
+    return outcome;
+  }
+  LoadOutcome loaded = load_record_bytes(bytes, LoadMode::Strict);
+  if (!loaded.ok) {
+    outcome.error = "invalid record: " + loaded.error;
+    return outcome;
+  }
+  if (loaded.record.meta.scenario.empty()) {
+    outcome.error = "record has no scenario metadata";
+    return outcome;
+  }
+  for (const auto& stored : records_) {
+    if (stored.record && stored.record->hash == loaded.record.hash) {
+      outcome.ok = true;
+      outcome.duplicate = true;
+      outcome.id = stored.id;
+      outcome.record = stored.record;
+      return outcome;
+    }
+  }
+  const RecordId id = add_record(std::move(loaded.record), RunSummary{});
+  if (id == 0) {
+    outcome.error = "record could not be stored";
+    return outcome;
+  }
+  outcome.ok = true;
+  outcome.id = id;
+  outcome.record = get_record(id);
+  broadcast_overview();
+  return outcome;
+}
+
+bool Workbench::delete_record(RecordId id, bool delete_file, std::string* error) {
+  auto it = std::find_if(records_.begin(), records_.end(),
+                         [id](const StoredRecord& stored) { return stored.id == id; });
+  if (it == records_.end()) {
+    if (error) *error = "record not found";
+    return false;
+  }
+  if (delete_file && !it->file.empty()) {
+    std::error_code ec;
+    std::filesystem::remove(it->file, ec);
+    if (ec) {
+      if (error) *error = "cannot delete record file: " + ec.message();
+      return false;
+    }
+  }
+  sessions_.erase(id);
+  records_.erase(it);
+  if (last_record_ == id) {
+    last_record_ = records_.empty() ? 0 : records_.back().id;
+  }
+  broadcast_overview();
+  return true;
 }
 
 DebugSession* Workbench::session_for(RecordId id, bool create) {

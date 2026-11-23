@@ -669,7 +669,13 @@ bool HttpServer::authorize(const HttpRequest& request, HttpResponse* error) cons
   }
   if (request.method == "POST" && !request.body.empty()) {
     const std::string* type = request.header("content-type");
-    if (type == nullptr || type->rfind("application/json", 0) != 0) {
+    const bool import_endpoint = request.path == "/api/records/import";
+    if (import_endpoint) {
+      if (type == nullptr || type->rfind("application/octet-stream", 0) != 0) {
+        *error = error_response(415, "record imports must be application/octet-stream");
+        return false;
+      }
+    } else if (type == nullptr || type->rfind("application/json", 0) != 0) {
       *error = error_response(415, "POST bodies must be application/json");
       return false;
     }

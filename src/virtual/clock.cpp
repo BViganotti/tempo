@@ -1,6 +1,7 @@
 #include "tempo/clock.hpp"
 
-#include <cstdio>
+#include "tempo/format.hpp"
+
 #include <limits>
 #include <string>
 
@@ -26,21 +27,16 @@ void VirtualClock::advance_by(std::uint64_t delta_ns) noexcept {
 }
 
 std::string format_ns(std::uint64_t ns) {
-  char buffer[64];
   if (ns < 1'000) {
-    std::snprintf(buffer, sizeof(buffer), "%lluns",
-                  static_cast<unsigned long long>(ns));
-  } else if (ns < 1'000'000) {
-    std::snprintf(buffer, sizeof(buffer), "%.3fus",
-                  static_cast<double>(ns) / 1'000.0);
-  } else if (ns < 1'000'000'000) {
-    std::snprintf(buffer, sizeof(buffer), "%.3fms",
-                  static_cast<double>(ns) / 1'000'000.0);
-  } else {
-    std::snprintf(buffer, sizeof(buffer), "%.3fs",
-                  static_cast<double>(ns) / 1'000'000'000.0);
+    return std::to_string(ns) + "ns";
   }
-  return std::string(buffer);
+  if (ns < 1'000'000) {
+    return format_fixed(static_cast<double>(ns) / 1'000.0, 3) + "us";
+  }
+  if (ns < 1'000'000'000) {
+    return format_fixed(static_cast<double>(ns) / 1'000'000.0, 3) + "ms";
+  }
+  return format_fixed(static_cast<double>(ns) / 1'000'000'000.0, 3) + "s";
 }
 
 }  // namespace tempo

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <limits>
 
+#include "tempo/format.hpp"
 #include "tempo/limits.hpp"
 
 namespace tempo {
@@ -150,9 +151,7 @@ void Context::watch(std::string_view name, std::int64_t value) const {
 }
 
 void Context::watch(std::string_view name, double value) const {
-  char buffer[64];
-  std::snprintf(buffer, sizeof(buffer), "%.6g", value);
-  watch(name, std::string_view(buffer));
+  watch(name, std::string_view(format_general(value, 6)));
 }
 
 void Context::watch(std::string_view name, bool value) const {

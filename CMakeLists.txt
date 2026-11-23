@@ -49,6 +49,7 @@ add_library(tempo STATIC
   src/replay/diff.cpp
   src/debug/debug.cpp
   src/ui/json.cpp
+  src/ui/format.cpp
   src/ui/http.cpp
   src/ui/assets.cpp
   src/ui/workbench.cpp
@@ -134,6 +135,7 @@ if(BUILD_TESTING)
   tempo_add_test(version_test)
   tempo_add_test(rng_test)
   tempo_add_test(clock_test)
+  tempo_add_test(format_test)
   tempo_add_test(crc32_test)
   tempo_add_test(string_table_test)
   tempo_add_test(event_test)

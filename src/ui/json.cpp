@@ -7,6 +7,7 @@
 #include <cstring>
 #include <utility>
 
+#include "tempo/format.hpp"
 #include "tempo/ids.hpp"
 #include "tempo/limits.hpp"
 
@@ -534,9 +535,7 @@ void Value::dump_to(std::string& out, int depth) const {
       if (std::fabs(number_) < 9.0e15 && number_ == std::floor(number_)) {
         out += std::to_string(static_cast<std::int64_t>(number_));
       } else {
-        char buffer[40];
-        std::snprintf(buffer, sizeof(buffer), "%.17g", number_);
-        out += buffer;
+        out += format_json_number(number_);
       }
       break;
     }

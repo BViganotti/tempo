@@ -499,7 +499,7 @@
   async function recordRun(scenario, seed, mutateStep, mutateChoice, quiet = false) {
     setStatus("recording", "busy");
     try {
-      const body = { scenario, seed };
+      const body = { scenario, seed: String(seed) };
       if (mutateStep !== null && mutateStep !== undefined) {
         body.mutateStep = mutateStep;
         body.mutateChoice = mutateChoice || 0;
@@ -707,8 +707,8 @@
     const file = event.target.files && event.target.files[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size > 256 * 1024) {
-      toast("Record import is limited to 256 KiB over HTTP.", true);
+    if (file.size > 64 * 1024 * 1024) {
+      toast("Record import is limited to 64 MiB over HTTP.", true);
       return;
     }
     setStatus("importing", "busy");
@@ -771,11 +771,12 @@
     $("scenario").addEventListener("change", updateScenarioNote);
     $("record-btn").addEventListener("click", () => {
       const scenario = $("scenario").value;
-      const seed = Number($("seed").value);
+      const seedText = $("seed").value.trim();
+      const seed = seedText === "" ? "7" : seedText;
       const mutateText = $("record-mutate-step").value.trim();
       const mutateStep = mutateText === "" ? null : Number(mutateText);
       const mutateChoice = Number($("record-mutate-choice").value) || 0;
-      recordRun(scenario, Number.isFinite(seed) ? seed : 0, mutateStep, mutateChoice)
+      recordRun(scenario, seed, mutateStep, mutateChoice)
         .catch(() => {});
     });
     $("first").addEventListener("click", () => setIndex(0));

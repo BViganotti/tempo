@@ -128,6 +128,10 @@ class Workbench {
   /// Remove a record from memory and, when `delete_file` is set, from disk.
   bool delete_record(RecordId id, bool delete_file, std::string* error);
 
+  /// Load a record file that was kept on disk because it did not fit the
+  /// in-memory record/memory cap. `filename` must be a basename in records/.
+  RecordOutcome open_archived(std::string_view filename);
+
   std::shared_ptr<const Record> get_record(RecordId id) const;
   std::vector<StoredRecord> records() const;
 
@@ -146,6 +150,7 @@ class Workbench {
   json::Value state_json(const WatchMap& state) const;
   json::Value summary_json(const RunSummary& summary) const;
   json::Value breakpoints_json() const;
+  json::Value archive_json() const;
   json::Value replay_json(RecordId id, const std::shared_ptr<const Record>& record,
                           const ReplayOutcome& outcome, std::uint32_t runs,
                           ReplayOptions options) const;
@@ -178,6 +183,7 @@ class Workbench {
   RecordId next_record_id_ = 1;
   RecordId last_record_ = 0;
   std::vector<std::string> load_warnings_;
+  std::vector<std::string> archive_files_;
   std::size_t used_bytes_ = 0;
   std::function<void(std::string_view, std::string_view)> broadcaster_;
   std::string session_token_;

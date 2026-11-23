@@ -285,9 +285,13 @@ bool Workbench::initialize(std::string* error) {
     load_warnings_.push_back("directory scan failed: " + ec.message());
   }
   std::sort(files.begin(), files.end());
-  if (files.size() > options_.max_records) {
-    files.erase(files.begin(), files.end() - static_cast<std::ptrdiff_t>(options_.max_records));
-  }
+  auto remember_archive = [this](const std::filesystem::path& path) {
+    const std::string name = path.filename().string();
+    if (std::find(archive_files_.begin(), archive_files_.end(), name) ==
+        archive_files_.end()) {
+      archive_files_.push_back(name);
+    }
+  };
   struct LoadedFile {
     Record record;
     std::string path;
@@ -300,6 +304,7 @@ bool Workbench::initialize(std::string* error) {
     if (loaded_files.size() >= options_.max_records) {
       load_warnings_.push_back("older records kept on disk outside the memory cap: " +
                                it->filename().string());
+      remember_archive(*it);
       continue;
     }
     std::error_code size_error;
@@ -307,6 +312,7 @@ bool Workbench::initialize(std::string* error) {
     if (!size_error && file_size > options_.max_total_bytes - loaded_bytes) {
       load_warnings_.push_back("skipped " + it->filename().string() +
                                ": file exceeds the remaining workbench memory budget");
+      remember_archive(*it);
       continue;
     }
     const LoadOutcome loaded = load_record_file(it->string(), LoadMode::Recover);
@@ -328,6 +334,7 @@ bool Workbench::initialize(std::string* error) {
     if (loaded_bytes + estimate > options_.max_total_bytes) {
       load_warnings_.push_back("skipped " + it->filename().string() +
                                ": record exceeds the workbench memory budget");
+      remember_archive(*it);
       continue;
     }
     loaded_bytes += estimate;
@@ -479,6 +486,7 @@ Value Workbench::overview_json() const {
   }
   value["records"] = std::move(records);
   value["breakpoints"] = breakpoints_json();
+  value["archive"] = archive_json();
   Value warnings = Value::array();
   for (const auto& warning : load_warnings_) {
     warnings.push(jstr(warning));
@@ -521,6 +529,23 @@ Value Workbench::state_json(const WatchMap& state) const {
       task_value[name] = jstr(var_value);
     }
     value[std::to_string(task)] = std::move(task_value);
+  }
+  return value;
+}
+
+Value Workbench::archive_json() const {
+  Value value = Value::array();
+  const std::filesystem::path records_dir =
+      std::filesystem::path(options_.data_dir) / "records";
+  for (const auto& name : archive_files_) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(records_dir / name, ec);
+    Value item = Value::object();
+    item["file"] = jstr(name);
+    if (!ec) {
+      item["size"] = number(static_cast<std::uint64_t>(size));
+    }
+    value.push(std::move(item));
   }
   return value;
 }
@@ -664,6 +689,38 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
     result["memoryUsed"] = number(static_cast<std::uint64_t>(used_bytes_));
     result["memoryBudget"] = number(static_cast<std::uint64_t>(options_.max_total_bytes));
     return json_response(result);
+  }
+
+  if (parts.size() == 1 && parts[0] == "archive") {
+    if (request.method != "GET") return error_response(405, "method not allowed");
+    Value result = Value::object();
+    result["records"] = archive_json();
+    return json_response(result);
+  }
+
+  if (parts.size() == 2 && parts[0] == "records" && parts[1] == "open") {
+    if (request.method != "POST") return error_response(405, "method not allowed");
+    const json::ParseOutcome body = json::parse(request.body);
+    if (!body.ok || !body.value.is_object()) {
+      return error_response(400, "invalid JSON body");
+    }
+    const Value* file = body.value.find("file");
+    if (file == nullptr || !file->is_string()) {
+      return error_response(400, "file is required");
+    }
+    RecordOutcome outcome = open_archived(file->as_string());
+    Value result = Value::object();
+    result["ok"] = Value(outcome.ok);
+    if (!outcome.error.empty()) result["error"] = jstr(outcome.error);
+    if (outcome.record) {
+      for (const auto& stored : records_) {
+        if (stored.id == outcome.id) {
+          result["record"] = record_json(stored);
+          break;
+        }
+      }
+    }
+    return json_response(result, outcome.ok ? 200 : 400);
   }
 
   if (parts.size() == 2 && parts[0] == "records" && parts[1] == "import") {
@@ -1221,6 +1278,14 @@ RecordId Workbench::add_record(Record record, RunSummary summary) {
   while (!records_.empty() &&
          (records_.size() >= options_.max_records ||
           used_bytes_ + estimate > options_.max_total_bytes)) {
+    const std::string evicted_file = records_.front().file;
+    if (!evicted_file.empty()) {
+      const std::string name = std::filesystem::path(evicted_file).filename().string();
+      if (std::find(archive_files_.begin(), archive_files_.end(), name) ==
+          archive_files_.end()) {
+        archive_files_.push_back(name);
+      }
+    }
     sessions_.erase(records_.front().id);
     used_bytes_ -= records_.front().memory_bytes;
     records_.erase(records_.begin());
@@ -1517,6 +1582,57 @@ json::Value Workbench::jobs_json() {
   return value;
 }
 
+Workbench::RecordOutcome Workbench::open_archived(std::string_view filename) {
+  RecordOutcome outcome;
+  if (!initialized_) {
+    outcome.error = "workbench is not initialized";
+    return outcome;
+  }
+  const std::string name(filename);
+  if (name.empty() || name.size() > 255 || name.find('/') != std::string::npos ||
+      name.find('\\') != std::string::npos || name.find("..") != std::string::npos ||
+      name.find('\0') != std::string::npos ||
+      std::filesystem::path(name).extension() != ".tmpo") {
+    outcome.error = "invalid archive filename";
+    return outcome;
+  }
+  const std::filesystem::path path =
+      std::filesystem::path(options_.data_dir) / "records" / name;
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec) || ec) {
+    outcome.error = "archive file not found";
+    return outcome;
+  }
+  const LoadOutcome loaded = load_record_file(path.string(), LoadMode::Recover);
+  if (!loaded.ok) {
+    outcome.error = "invalid archive record: " + loaded.error;
+    return outcome;
+  }
+  for (const auto& stored : records_) {
+    if (stored.record && stored.record->hash == loaded.record.hash) {
+      archive_files_.erase(std::remove(archive_files_.begin(), archive_files_.end(), name),
+                           archive_files_.end());
+      outcome.ok = true;
+      outcome.id = stored.id;
+      outcome.record = stored.record;
+      outcome.summary.ok = loaded.record.complete;
+      return outcome;
+    }
+  }
+  const RecordId id = add_record(loaded.record, RunSummary{});
+  if (id == 0) {
+    outcome.error = "record exceeds the workbench memory budget";
+    return outcome;
+  }
+  archive_files_.erase(std::remove(archive_files_.begin(), archive_files_.end(), name),
+                       archive_files_.end());
+  outcome.ok = true;
+  outcome.id = id;
+  outcome.record = get_record(id);
+  broadcast_overview();
+  return outcome;
+}
+
 std::shared_ptr<const Record> Workbench::get_record(RecordId id) const {
   for (const auto& stored : records_) {
     if (stored.id == id) {
@@ -1587,6 +1703,11 @@ bool Workbench::delete_record(RecordId id, bool delete_file, std::string* error)
   }
   sessions_.erase(id);
   used_bytes_ -= it->memory_bytes;
+  if (delete_file && !it->file.empty()) {
+    const std::string name = std::filesystem::path(it->file).filename().string();
+    archive_files_.erase(std::remove(archive_files_.begin(), archive_files_.end(), name),
+                         archive_files_.end());
+  }
   records_.erase(it);
   if (last_record_ == id) {
     last_record_ = records_.empty() ? 0 : records_.back().id;

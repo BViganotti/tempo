@@ -1,4 +1,4 @@
-.PHONY: all build test clean asan tsan bench fuzz
+.PHONY: all build test clean asan tsan bench fuzz ui-smoke
 
 BUILD ?= build
 
@@ -23,6 +23,9 @@ tsan:
 
 bench: build
 	./$(BUILD)/tempo_bench
+
+ui-smoke: build
+	./scripts/ui_smoke.sh
 
 fuzz: build
 	./$(BUILD)/fuzz_record --iterations 20000

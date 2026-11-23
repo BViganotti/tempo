@@ -82,6 +82,7 @@ class TestHost final : public RunHost {
     }
     result.ok = true;
     result.handle = next_socket++;
+    recv_buffers[result.handle] = "";
     return result;
   }
 

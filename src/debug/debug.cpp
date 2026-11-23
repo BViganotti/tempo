@@ -136,7 +136,11 @@ std::optional<std::uint32_t> DebugSession::add_breakpoint(Breakpoint breakpoint)
   if (breakpoint.has_text && breakpoint.text.size() > 128) {
     breakpoint.text.resize(128);
   }
-  breakpoint.id = next_breakpoint_id_++;
+  if (breakpoint.id == 0) {
+    breakpoint.id = next_breakpoint_id_++;
+  } else if (breakpoint.id >= next_breakpoint_id_) {
+    next_breakpoint_id_ = breakpoint.id + 1;
+  }
   breakpoints_.push_back(std::move(breakpoint));
   return breakpoints_.back().id;
 }

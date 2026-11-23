@@ -45,6 +45,12 @@ Task failing_scenario(Context ctx) {
   (void)co_await ctx.join(child);
 }
 
+Task write_scenario(Context ctx) {
+  const CapResult written = ctx.write_file("scratch.txt", "recorded write");
+  ctx.watch("write_ok", written.ok);
+  co_return;
+}
+
 Task file_scenario(Context ctx) {
   const CapResult read = ctx.read_file("manifest.txt");
   ctx.watch("ok", read.ok);
@@ -173,6 +179,23 @@ TEST(environment_is_answered_from_the_record) {
   CHECK(!::getenv("TEMPO_REPLAY_ENV"));
   const ReplayReport replay = replay_record(recorded.record, file_scenario);
   CHECK(replay.identical);
+}
+
+TEST(replayed_writes_do_not_touch_the_disk) {
+  test::TempDir dir;
+  RecordRunResult recorded;
+  {
+    SystemHost host({.data_root = dir.path()});
+    recorded = record_run("write", write_scenario, host);
+  }
+  CHECK(recorded.ok);
+  CHECK(dir.exists("scratch.txt"));
+  std::error_code ec;
+  CHECK(std::filesystem::remove(dir.path() + "/scratch.txt", ec));
+  const ReplayReport replay = replay_record(recorded.record, write_scenario);
+  CHECK(replay.ok);
+  CHECK(replay.identical);
+  CHECK(!dir.exists("scratch.txt"));
 }
 
 TEST(replay_many_rejects_zero_runs) {

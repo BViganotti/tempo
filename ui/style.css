@@ -124,6 +124,12 @@ button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: linear-gradient(180deg, #2f6fd0, #2459a8); border-color: #3f7bdb; color: #f2f7ff; }
 button.primary:hover { background: linear-gradient(180deg, #3a7ee3, #2a63b9); }
+.button-link {
+  display: inline-flex; align-items: center; text-decoration: none;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+  padding: 8px 11px; color: var(--text); font-size: 13px;
+}
+.button-link:hover { background: #1b283b; border-color: #2c3f5e; }
 button.wide { width: 100%; }
 button.icon { padding: 7px 10px; font-family: var(--mono); }
 .row { display: flex; gap: 8px; align-items: end; }

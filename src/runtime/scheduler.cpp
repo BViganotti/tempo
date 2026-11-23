@@ -100,11 +100,11 @@ const Scheduler::Slot* Scheduler::slot(TaskId id) const noexcept {
   return slots_[id - 1].get();
 }
 
-TaskId Scheduler::spawn_root(std::string name, Task (*entry)(Context)) {
+TaskId Scheduler::spawn_root(std::string name, std::function<Task(Context)> entry) {
   if (started_) {
     throw LimitError("spawn_root called twice");
   }
-  if (entry == nullptr) {
+  if (!entry) {
     throw LimitError("null scenario entry");
   }
   started_ = true;
@@ -117,7 +117,7 @@ TaskId Scheduler::spawn_root(std::string name, Task (*entry)(Context)) {
   start.d = clock_.now_ns();
   start.s1 = scenario_name_;
   emit(std::move(start));
-  return spawn(std::move(name), [entry](Context ctx) { return entry(ctx); }, kNoTask);
+  return spawn(std::move(name), std::move(entry), kNoTask);
 }
 
 TaskId Scheduler::spawn(std::string name, std::function<Task(Context)> body, TaskId parent) {

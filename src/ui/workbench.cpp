@@ -479,6 +479,7 @@ Value Workbench::replay_json(RecordId id, const ReplayOutcome& outcome, std::uin
     }
     value["hashes"] = std::move(hashes);
     value["elapsedNs"] = number(batch.elapsed_ns);
+    value["failedRun"] = Value(batch.first_failed_run);
     value["divergence"] = Value();
   } else {
     const ReplayReport& report = outcome.single;
@@ -532,6 +533,15 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
     return error_response(404, "unknown endpoint");
   }
   const std::vector<std::string> parts = split_path(path.substr(5));
+
+  if (parts.size() == 1 && parts[0] == "stream") {
+    if (request.method != "GET") return error_response(405, "method not allowed");
+    HttpResponse response;
+    response.sse = true;
+    response.content_type = "text/event-stream";
+    response.body = ": tempo stream connected\n\n";
+    return response;
+  }
 
   if (parts.size() == 1 && parts[0] == "overview") {
     if (request.method != "GET") return error_response(405, "method not allowed");
@@ -756,6 +766,25 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
       }
       result["events"] = std::move(events);
       return json_response(result);
+    }
+
+    if (parts.size() == 3 && parts[2] == "download") {
+      if (request.method != "GET") return error_response(405, "method not allowed");
+      const SerializeOutcome serialized_record = serialize_record(*record);
+      if (!serialized_record.ok) {
+        return error_response(500, "record could not be serialized: " + serialized_record.error);
+      }
+      if (serialized_record.bytes.size() > limits::kMaxHttpResponseBytes) {
+        return error_response(413, "record is too large to download through the UI");
+      }
+      HttpResponse response;
+      response.status = 200;
+      response.content_type = "application/octet-stream";
+      response.body = serialized_record.bytes;
+      response.extra_headers.emplace_back(
+          "Content-Disposition",
+          "attachment; filename=\"rec-" + record->hash_hex().substr(0, 8) + ".tmpo\"");
+      return response;
     }
 
     if (parts.size() == 3 && parts[2] == "frame") {

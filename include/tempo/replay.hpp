@@ -73,6 +73,8 @@ struct ReplayBatchReport {
   std::uint64_t expected_hash = 0;
   std::vector<std::uint64_t> hashes;
   std::uint64_t elapsed_ns = 0;
+  /// 0-based run that first diverged, or -1 when every run matched.
+  std::int64_t first_failed_run = -1;
   std::string error;
 };
 

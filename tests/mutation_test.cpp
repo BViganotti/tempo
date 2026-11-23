@@ -96,6 +96,19 @@ TEST(mutation_that_cannot_apply_leaves_the_run_identical) {
   CHECK(replay.identical);
 }
 
+TEST(batch_replay_reports_the_first_failing_run) {
+  test::TestHost capabilities;
+  const RecordRunResult recorded = record_run("race", racing, capabilities);
+  CHECK(recorded.ok);
+  ReplayOptions options;
+  options.mutate_step = 1;
+  const ReplayBatchReport batch = replay_many(recorded.record, racing, 4, options);
+  CHECK(batch.ok);
+  CHECK(!batch.all_identical);
+  CHECK_EQ(batch.first_failed_run, std::int64_t(0));
+  CHECK_EQ(batch.hashes.size(), std::size_t(4));
+}
+
 TEST(mutation_choice_varies_which_task_is_picked) {
   test::TestHost capabilities;
   const RecordRunResult recorded = record_run("race", racing, capabilities);

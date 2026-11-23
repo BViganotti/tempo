@@ -189,7 +189,8 @@
       ["Expected hash", shortHash(result.expectedHash), "mono"],
       ["Elapsed", fmtMs(result.elapsedNs), ""],
       ["Recorded events", String(result.recordedEvents), ""],
-      ["Replayed events", String(result.replayedEvents), ""]
+      ["Replayed events", String(result.replayedEvents), ""],
+      ["First failing run", result.failedRun >= 0 ? "#" + (result.failedRun + 1) : "—", result.failedRun >= 0 ? "bad" : ""]
     ];
     for (const [key, value, cls] of stats) {
       const card = el("div", "stat");
@@ -532,6 +533,7 @@
     state.divergence = null;
     state.frame = null;
     $("session-hash").textContent = shortHash(meta.hash);
+    $("download").href = withToken("/api/records/" + id + "/download");
     renderRecords();
     renderReplay(null);
     renderDivergence(null);

@@ -321,6 +321,9 @@ ReplayBatchReport replay_many(const Record& record, std::function<Task(Context)>
     }
     if (!one.identical) {
       identical = false;
+      if (report.first_failed_run < 0) {
+        report.first_failed_run = static_cast<std::int64_t>(i);
+      }
     }
   }
   const auto end = std::chrono::steady_clock::now();

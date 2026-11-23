@@ -227,6 +227,9 @@ std::string event_summary(const Event& event) {
     case EventType::Unknown:
       out = "unknown event";
       break;
+    default:
+      out = "unrecognized event";
+      break;
   }
   return out;
 }

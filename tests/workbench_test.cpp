@@ -254,6 +254,45 @@ TEST(flaky_service_fixture_is_prepared_and_replayable) {
   CHECK(parse_body(replay).find("identical")->as_bool());
 }
 
+TEST(record_download_returns_the_portable_container) {
+  Fixture fixture;
+  const HttpResponse recorded = call(
+      fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"counter-race","seed":4})");
+  const std::int64_t id = parse_body(recorded).find("record")->find("id")->as_i64();
+  const HttpResponse download = call(
+      fixture.workbench, "GET", "/api/records/" + std::to_string(id) + "/download");
+  CHECK_EQ(download.status, 200);
+  CHECK(download.content_type.find("application/octet-stream") != std::string::npos);
+  bool disposition = false;
+  for (const auto& [name, value] : download.extra_headers) {
+    if (name == "Content-Disposition" && value.find(".tmpo") != std::string::npos) {
+      disposition = true;
+    }
+  }
+  CHECK(disposition);
+  const auto record = fixture.workbench.get_record(static_cast<RecordId>(id));
+  CHECK(record != nullptr);
+  const SerializeOutcome expected = serialize_record(*record);
+  CHECK(expected.ok);
+  CHECK(download.body == expected.bytes);
+  const LoadOutcome loaded = load_record_bytes(download.body);
+  CHECK(loaded.ok);
+}
+
+TEST(batch_replay_api_reports_failed_run) {
+  Fixture fixture;
+  const HttpResponse recorded = call(
+      fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"counter-race","seed":8})");
+  const std::int64_t id = parse_body(recorded).find("record")->find("id")->as_i64();
+  const HttpResponse replay = call(
+      fixture.workbench, "POST", "/api/replay", {},
+      R"({"recordId":)" + std::to_string(id) + R"(,"runs":4,"mutateStep":1})");
+  CHECK_EQ(replay.status, 200);
+  const json::Value body = parse_body(replay);
+  CHECK(!body.find("identical")->as_bool());
+  CHECK_EQ(body.find("failedRun")->as_i64(), 0);
+}
+
 TEST(api_rejects_bad_inputs) {
   Fixture fixture;
   CHECK_EQ(call(fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"nope"})").status,

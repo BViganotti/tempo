@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -146,6 +147,12 @@ class Context {
     watch(name, std::string_view(value == nullptr ? "" : value));
   }
   void watch(std::string_view name, std::int64_t value) const;
+  template <typename T>
+    requires(std::is_integral_v<T> && !std::is_same_v<T, bool> &&
+             !std::is_same_v<T, std::int64_t> && !std::is_same_v<T, char>)
+  void watch(std::string_view name, T value) const {
+    watch(name, static_cast<std::int64_t>(value));
+  }
   void watch(std::string_view name, double value) const;
   void watch(std::string_view name, bool value) const;
 
@@ -235,7 +242,7 @@ class Scheduler {
   Scheduler& operator=(Scheduler&&) = delete;
 
   /// Spawn the first task of the run. Must be called once, before run().
-  TaskId spawn_root(std::string name, Task (*entry)(Context));
+  TaskId spawn_root(std::string name, std::function<Task(Context)> entry);
 
   /// Spawn a task from inside a running task (also used by spawn_root).
   TaskId spawn(std::string name, std::function<Task(Context)> body, TaskId parent);

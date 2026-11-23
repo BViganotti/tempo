@@ -488,7 +488,7 @@
     if (!state.records.some((record) => record.id === id)) {
       id = data.lastRecord || state.records[state.records.length - 1].id;
     }
-    if (id !== state.current) {
+    if (id !== state.current || !state.record || state.timeline === null) {
       await selectRecord(id);
     } else {
       const meta = state.records.find((record) => record.id === id);
@@ -509,7 +509,6 @@
         const warning = data.warning ? " (" + data.warning + ")" : "";
         toast("Recorded " + data.record.scenario + " — " + data.record.events + " events" + warning);
       }
-      state.current = data.record.id;
       await loadOverview(data.record.id);
       setStatus("live", "live");
     } catch (error) {

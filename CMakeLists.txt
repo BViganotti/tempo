@@ -44,6 +44,7 @@ add_library(tempo STATIC
   src/record/string_table.cpp
   src/record/record.cpp
   src/record/record_io.cpp
+  src/record/record_run.cpp
 )
 target_include_directories(tempo PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -86,6 +87,7 @@ if(BUILD_TESTING)
   tempo_add_test(record_roundtrip_test)
   tempo_add_test(record_recovery_test)
   tempo_add_test(record_fuzz_test)
+  tempo_add_test(record_run_test)
   tempo_add_test(task_test)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)

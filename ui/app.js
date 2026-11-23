@@ -534,6 +534,7 @@
     state.frame = null;
     $("session-hash").textContent = shortHash(meta.hash);
     $("download").href = withToken("/api/records/" + id + "/download");
+    $("delete-record").disabled = false;
     renderRecords();
     renderReplay(null);
     renderDivergence(null);
@@ -692,6 +693,67 @@
     }
   }
 
+  async function clearBreakpoints() {
+    try {
+      await api("/api/breakpoints/clear", { method: "POST", body: "{}" });
+      const data = await api("/api/breakpoints");
+      state.breakpoints = data.breakpoints || [];
+      renderBreakpoints();
+    } catch (error) {
+      toast("Clear breakpoints failed: " + error.message, true);
+    }
+  }
+
+  async function importRecord(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      toast("Record import is limited to 256 KiB over HTTP.", true);
+      return;
+    }
+    setStatus("importing", "busy");
+    try {
+      const bytes = await file.arrayBuffer();
+      const response = await fetch(withToken("/api/records/import"), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: bytes
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+      toast(data.duplicate ? "Record already present." : "Imported " + file.name + ".");
+      await loadOverview(data.record ? data.record.id : null);
+      setStatus("live", "live");
+    } catch (error) {
+      setStatus("error", "error");
+      toast("Import failed: " + error.message, true);
+    }
+  }
+
+  async function deleteCurrentRecord() {
+    if (!state.current) { toast("No record selected.", true); return; }
+    if (!confirm("Delete record #" + state.current + " and its .tmpo file?")) return;
+    try {
+      await api("/api/records/" + state.current + "/delete", {
+        method: "POST",
+        body: JSON.stringify({ deleteFile: true })
+      });
+      state.current = null;
+      state.record = null;
+      state.events = [];
+      state.total = 0;
+      state.frame = null;
+      state.divergence = null;
+      renderEvents();
+      renderInspector();
+      await loadOverview(null);
+      toast("Record deleted.");
+    } catch (error) {
+      toast("Delete failed: " + error.message, true);
+    }
+  }
+
   async function runToBreakpoint(direction) {
     if (!state.current) return;
     try {
@@ -732,6 +794,10 @@
       runReplay(1, step, choice);
     });
     $("bp-form").addEventListener("submit", addBreakpoint);
+    $("bp-clear").addEventListener("click", clearBreakpoints);
+    $("import-btn").addEventListener("click", () => $("import-file").click());
+    $("import-file").addEventListener("change", importRecord);
+    $("delete-record").addEventListener("click", deleteCurrentRecord);
     $("diff-btn").addEventListener("click", loadDiff);
     $("timeline").addEventListener("click", (event) => {
       if (!state.record || !state.total) return;
@@ -779,6 +845,7 @@
   }
 
   function init() {
+    $("delete-record").disabled = true;
     const favicon = $("favicon");
     if (favicon) favicon.href = withToken("/favicon.svg");
     const typeSelect = $("bp-type");

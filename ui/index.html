@@ -44,6 +44,10 @@
           </label>
         </div>
         <button id="record-btn" class="primary wide">Record run</button>
+        <div class="row import-row">
+          <button id="import-btn">Import .tmpo</button>
+          <input id="import-file" type="file" accept=".tmpo,application/octet-stream" hidden>
+        </div>
         <p id="scenario-note" class="hint"></p>
       </section>
 
@@ -61,6 +65,7 @@
           <input id="bp-task" type="number" min="0" placeholder="task id">
           <input id="bp-text" type="text" maxlength="128" placeholder="text match">
           <button class="wide">Add breakpoint</button>
+          <button id="bp-clear" class="wide" type="button">Clear all breakpoints</button>
         </form>
         <ul id="breakpoints" class="breakpoints"></ul>
       </section>
@@ -82,6 +87,7 @@
           <button id="replay" class="primary">Replay</button>
           <button id="replay100">Replay ×100</button>
           <a id="download" class="button-link" href="#" title="Download the portable .tmpo record">Export .tmpo</a>
+          <button id="delete-record" title="Delete this record and its file">Delete</button>
         </div>
       </section>
 

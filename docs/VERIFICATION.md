@@ -6,6 +6,7 @@ Environment for the recorded runs:
 - Apple Clang 21.0.0 (Xcode 26)
 - CMake 4.2.3, Ninja 1.13.0
 - Release build for ctest/bench/fuzz; Debug sanitizer builds
+- Homebrew LLVM/Clang 20.1.8 for the optional libFuzzer harnesses
 
 Every number and pass/fail below was produced by running the command on this
 machine. Nothing is estimated.
@@ -20,7 +21,7 @@ ctest --test-dir build --output-on-failure
 
 Result: build completed with zero warnings under
 `-Wall -Wextra -Wpedantic -Werror -Wshadow -Wnon-virtual-dtor
--Woverloaded-virtual -Wunused -Wformat=2`; **37/37 tests passed**.
+-Woverloaded-virtual -Wunused -Wformat=2`; **45/45 tests passed**.
 
 ## ASan + UBSan
 
@@ -30,13 +31,16 @@ cmake --build build-asan -j
 ctest --test-dir build-asan --output-on-failure
 ```
 
-Result: **37/37 tests passed**. The sanitizer found two real issues during
+Result: **45/45 tests passed**. The sanitizer found two real issues during
 development, both fixed before the final run:
 
 1. `json::Value::dump` cast a large double to `int64_t` before range checking
    (UBSan).
 2. A test iterated a member of a temporary parsed JSON value (ASan
    heap-use-after-free). Production code was unaffected, but the test was fixed.
+
+The async-worker, archive, memory-budget and locale changes were all included in
+this final run.
 
 ## Thread sanitizer
 
@@ -46,11 +50,12 @@ cmake --build build-tsan -j
 ctest --test-dir build-tsan --output-on-failure
 ```
 
-Result: **37/37 tests passed**, including `integration_test`, which runs the
-HTTP accept/read/route/SSE loop on a thread and drives it from clients. The SSE
-broadcast queue is the only cross-thread state and is mutex-protected.
+Result: **45/45 tests passed**, including `async_job_test` (background replay
+worker), `soak_test` and `integration_test` (HTTP accept/read/route/SSE loop).
+The SSE broadcast queue and the replay job map are the only cross-thread state;
+both are mutex-protected.
 
-## Fuzzers (20,000 iterations each, default seeds)
+## Deterministic fuzzers
 
 ```sh
 ./build/fuzz_record --iterations 20000
@@ -68,66 +73,92 @@ fuzz_http: 20000 iterations, 6798 complete, 8732 incomplete, 4470 errors, seed=4
 
 Each fuzzer is also a ctest smoke target at 500 iterations.
 
+## Optional coverage-guided libFuzzer
+
+Apple Clang does not ship compiler-rt's libFuzzer. With Homebrew LLVM:
+
+```sh
+cmake -S . -B build-fuzz -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DTEMPO_LIBFUZZER=ON \
+  -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
+  -DCMAKE_CXX_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer"
+cmake --build build-fuzz --target libfuzzer_record libfuzzer_json
+./build-fuzz/libfuzzer_record -max_total_time=4 -runs=1000 -max_len=4096
+./build-fuzz/libfuzzer_json -max_total_time=4 -runs=1000 -max_len=4096
+```
+
+Smoke results: record harness ran 1,000 executions (54 coverage counters loaded,
+no crash); JSON harness ran 1,000 executions (124 edges reached, no crash). The
+default deterministic fuzzers remain the ASan-covered path; the libFuzzer target
+is optional because the runtime is toolchain-dependent.
+
 ## Benchmarks
 
 ```sh
 ./build/tempo_bench
 ```
 
-Recorded output (Release):
+Recorded Release output:
 
 ```
 record: 20000 events, 5e28fac214dc1a12
-serialize x10                      110.25 ms       1814073 ops/s       95.3 MiB/s
+serialize x10                      113.43 ms       1763194 ops/s       92.6 MiB/s
 serialized size: 1101280 bytes
-strict load x10                     84.08 ms       2378629 ops/s      124.9 MiB/s
-event hash x100                    213.59 ms       9363550 ops/s
-JSON event page x20                 12.23 ms       1635256 ops/s      107.3 MiB/s
-file save + load x5                103.95 ms       1924047 ops/s      101.0 MiB/s
-record counter-race x50              0.96 ms         52056 ops/s
-replay counter-race x500             7.54 ms       8418169 ops/s
+strict load x10                     84.48 ms       2367516 ops/s      124.3 MiB/s
+event hash x100                    215.78 ms       9268490 ops/s
+JSON event page x20                 12.25 ms       1633259 ops/s      107.2 MiB/s
+file save + load x5                103.41 ms       1934081 ops/s      101.6 MiB/s
+record counter-race x50              1.00 ms         50232 ops/s
+replay counter-race x500             7.57 ms       8383160 ops/s
 counter-race replay: 127 events/run, hash 4478f29fe75c9d58
 ```
 
 These numbers measure a 20,000-event synthetic record and the built-in race;
-they are not universal performance claims. Replay of the 127-event demo is
-microseconds; most wall time in the UI path is HTTP plus JSON, not scheduling.
+they are not universal performance claims.
 
-## UI verification
-
-The launcher was started headlessly:
+## UI and install smoke
 
 ```sh
-./build/tempo_workbench --no-open --data-dir /tmp/tempo-ui
+./scripts/ui_smoke.sh
+./scripts/install_smoke.sh
 ```
 
-The printed URL was opened in a Chromium headless tab (via Orca's browser
-automation) at 1126×900. Observed:
+`ui_smoke` starts the real launcher on an ephemeral port, verifies tokenized
+assets, records a run, replays it 100 times, mutates one decision, reads a
+frame, and loads the page in headless Chromium with `selftest=1&nostream=1` to
+assert the DOM reached `counter-race` and rendered the timeline, filters and
+archive controls. Recorded result:
 
-- the page auto-recorded `counter-race` on the empty data directory;
-- status changed to `LIVE` over the SSE stream;
-- the timeline rendered four lanes (`system`, `t1 counter-race`, `t2 alpha`,
-  `t3 beta`) with event ticks;
-- the event table showed all 127 events and the inspector showed frame 0 with
-  no watch variables (correct for `ScenarioStart`);
-- clicking `Replay ×100` produced: 100 runs, identical **yes**, hashes stable
-  **yes**, replay/expected hash `4478f29f`, 1.56 ms elapsed in the page;
-- setting “Alter step” to 1 and replaying produced:
-  “First divergence at event 7 — event mismatch”, recorded `step 1: run task 2`
-  vs replayed `step 1: run task 3`, and the UI jumped to frame 8/127;
-- adding a `Watch` breakpoint and pressing `Breakpoint ▶` stopped at frame 9 on
-  `watch local_read = 0`, task 2;
-- the styled asset response was verified (CSS and JS carry the token injected
-  into the index document).
+```
+ui_smoke: OK (record 1, 100 identical replays, mutation divergence found)
+```
 
-A screenshot captured after these actions showed the dark workbench layout,
-timeline, event table, inspector, and the mutation controls. The screenshot was
-for verification only and is not shipped.
+`install_smoke` installs to a temporary prefix and builds a separate consumer
+against `tempo::tempo`:
+
+```
+install_smoke: OK (Tempo 0.2.0 (record v1))
+```
+
+Additional browser verification (Orca/Chromium at 1126×900):
+
+- status changes to `LIVE` over SSE;
+- timeline renders four lanes (`system`, `t1 counter-race`, `t2 alpha`,
+  `t3 beta`);
+- event table renders all 127 events;
+- `Replay ×100` reports 100 runs, identical **yes**, hashes stable **yes**,
+  replay/expected hash `4478f29f`, build id matches;
+- altering step 1 reports “First divergence at event 7 — event mismatch” with
+  recorded `step 1: run task 2` vs replayed `step 1: run task 3`;
+- type filter `Watch` shows `28 shown, 28 matching of 127`;
+- a `Watch` breakpoint stops at frame 9 on `watch local_read = 0`, task 2.
 
 ## Checks not automated
 
 - Real browser compatibility beyond Chromium was not tested; the UI uses
   standard `fetch`, `EventSource` and canvas.
 - Linux builds were not exercised; the code uses POSIX APIs.
-- The fuzzers are deterministic mutation harnesses, not coverage-guided
-  campaigns.
+- The libFuzzer harnesses require a non-Apple Clang toolchain and were run as
+  short smoke campaigns, not long fuzzing sessions.
+- Benchmarks are single-run, machine-specific measurements.

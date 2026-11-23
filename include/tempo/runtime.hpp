@@ -128,6 +128,9 @@ class Context {
   YieldAwaiter yield() const noexcept { return YieldAwaiter(scheduler_, id_); }
   SleepAwaiter sleep_ns(std::uint64_t duration_ns) const;
   SleepAwaiter sleep_ms(std::uint64_t duration_ms) const;
+  /// Suspend until an absolute virtual deadline. A past deadline becomes a
+  /// cooperative yield at the current time.
+  SleepAwaiter sleep_until_ns(std::uint64_t deadline_ns) const;
   JoinAwaiter join(TaskId target) const noexcept {
     return JoinAwaiter(scheduler_, id_, target);
   }
@@ -265,6 +268,12 @@ class Scheduler {
   std::uint64_t steps() const noexcept { return steps_; }
   const SchedulerOptions& options() const noexcept { return options_; }
   TaskState state_of(TaskId id) const noexcept;
+  /// Name captured at spawn time; empty for an unknown task.
+  std::string task_name(TaskId id) const;
+  /// Number of task slots created so far (including completed tasks).
+  std::uint32_t task_count() const noexcept {
+    return static_cast<std::uint32_t>(slots_.size());
+  }
 
   std::uint64_t random_u64(TaskId id);
   void watch(TaskId id, std::string_view name, std::string_view value);

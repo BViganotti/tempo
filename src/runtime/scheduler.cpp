@@ -343,6 +343,11 @@ bool Scheduler::is_cancelled(TaskId id) const noexcept {
   return s != nullptr && s->cancel_requested;
 }
 
+std::string Scheduler::task_name(TaskId id) const {
+  const Slot* s = slot(id);
+  return s == nullptr ? std::string() : s->name;
+}
+
 TaskState Scheduler::state_of(TaskId id) const noexcept {
   const Slot* s = slot(id);
   return s == nullptr ? TaskState::Done : s->state;

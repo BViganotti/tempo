@@ -100,6 +100,21 @@ SleepAwaiter Context::sleep_ms(std::uint64_t duration_ms) const {
   return sleep_ns(duration_ms * kScale);
 }
 
+SleepAwaiter Context::sleep_until_ns(std::uint64_t deadline_ns) const {
+  if (scheduler_ == nullptr) {
+    throw LimitError("sleep on an invalid context");
+  }
+  std::uint64_t deadline = deadline_ns;
+  const std::uint64_t now = scheduler_->now_ns();
+  if (deadline < now) {
+    deadline = now;
+  }
+  if (deadline > limits::kMaxVirtualNs) {
+    throw LimitError("sleep deadline exceeds the virtual clock limit");
+  }
+  return SleepAwaiter(scheduler_, id_, deadline);
+}
+
 bool Context::cancelled() const noexcept {
   return scheduler_ != nullptr && scheduler_->is_cancelled(id_);
 }

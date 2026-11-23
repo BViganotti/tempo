@@ -802,15 +802,51 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
       }
       if (limit == 0) limit = 1;
       limit = std::min<std::uint64_t>(limit, limits::kMaxEventPage);
-      const std::size_t total = record->events.size();
-      if (from > total) from = total;
-      Value result = Value::object();
-      result["total"] = number(static_cast<std::uint64_t>(total));
-      result["from"] = number(from);
-      Value events = Value::array();
-      for (std::size_t i = from; i < total && events.items().size() < limit; ++i) {
-        events.push(event_json(i, record->events[i]));
+      bool has_type = false;
+      EventType filter_type = EventType::Unknown;
+      bool has_task = false;
+      TaskId filter_task = kNoTask;
+      if (auto it = query.find("type"); it != query.end() && !it->second.empty()) {
+        if (!event_type_from_name(it->second, filter_type)) {
+          return error_response(400, "unknown event type filter");
+        }
+        has_type = true;
       }
+      if (auto it = query.find("task"); it != query.end() && !it->second.empty()) {
+        std::uint64_t task_value = 0;
+        if (!parse_u64(it->second, task_value) || task_value > UINT32_MAX) {
+          return error_response(400, "invalid task filter");
+        }
+        filter_task = static_cast<TaskId>(task_value);
+        has_task = true;
+      }
+      const bool filtered = has_type || has_task;
+      const std::size_t total = record->events.size();
+      std::size_t matched = 0;
+      std::size_t skipped = 0;
+      Value events = Value::array();
+      for (std::size_t i = 0; i < total; ++i) {
+        const Event& event = record->events[i];
+        if (has_type && event.type != filter_type) continue;
+        if (has_task && event.task != filter_task) continue;
+        ++matched;
+        if (filtered) {
+          if (skipped < from) {
+            ++skipped;
+            continue;
+          }
+        } else if (i < from) {
+          continue;
+        }
+        if (events.items().size() < limit) {
+          events.push(event_json(i, event));
+        }
+      }
+      if (!filtered && from > total) from = total;
+      Value result = Value::object();
+      result["total"] = number(static_cast<std::uint64_t>(filtered ? matched : total));
+      result["from"] = number(from);
+      result["filtered"] = Value(filtered);
       result["events"] = std::move(events);
       return json_response(result);
     }

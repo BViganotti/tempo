@@ -58,6 +58,21 @@ Task clock_reader(Context ctx) {
   ctx.watch("t1", static_cast<std::int64_t>(ctx.now_ns()));
 }
 
+Task named_child_root(Context ctx) {
+  const TaskId child = ctx.spawn("named-child", [](Context c) -> Task {
+    co_await c.yield();
+  });
+  (void)co_await ctx.join(child);
+}
+
+Task absolute_sleeper(Context ctx) {
+  const std::uint64_t deadline = ctx.now_ns() + 3'000'000;
+  ctx.watch("before", static_cast<std::int64_t>(ctx.now_ns()));
+  co_await ctx.sleep_until_ns(deadline);
+  ctx.watch("after", static_cast<std::int64_t>(ctx.now_ns()));
+  ctx.note("deadline", std::to_string(deadline));
+}
+
 Task self_join(Context ctx) {
   (void)co_await ctx.join(ctx.id());
 }
@@ -225,6 +240,41 @@ TEST(virtual_clock_advances_only_on_sleep) {
     }
   }
   CHECK_EQ(t1 - t0, std::uint64_t(2'000'000));
+}
+
+TEST(scheduler_task_names_and_counts) {
+  test::TestHost host;
+  Scheduler scheduler(host);
+  scheduler.spawn_root("root-name", named_child_root);
+  CHECK(scheduler.run().ok);
+  CHECK_EQ(scheduler.task_name(1), std::string("root-name"));
+  CHECK_EQ(scheduler.task_name(2), std::string("named-child"));
+  CHECK_EQ(scheduler.task_name(99), std::string());
+  CHECK_EQ(scheduler.task_count(), 2u);
+  CHECK(scheduler.state_of(1) == TaskState::Done);
+}
+
+TEST(absolute_sleep_uses_the_virtual_deadline) {
+  test::TestHost host;
+  Scheduler scheduler(host);
+  scheduler.spawn_root("absolute", absolute_sleeper);
+  CHECK(scheduler.run().ok);
+  std::uint64_t before = 0;
+  std::uint64_t after = 0;
+  std::uint64_t deadline = 0;
+  for (const auto& event : host.events) {
+    if (event.type == EventType::Watch && event.s1 == "before") {
+      before = std::stoull(event.s2);
+    }
+    if (event.type == EventType::Watch && event.s1 == "after") {
+      after = std::stoull(event.s2);
+    }
+    if (event.type == EventType::Note && event.s1 == "deadline") {
+      deadline = std::stoull(event.s2);
+    }
+  }
+  CHECK_EQ(after, deadline);
+  CHECK_EQ(after - before, std::uint64_t(3'000'000));
 }
 
 TEST(self_join_deadlocks_cleanly) {

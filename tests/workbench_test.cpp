@@ -401,6 +401,36 @@ TEST(record_cap_evicts_memory_but_keeps_files) {
   CHECK_EQ(files, std::size_t(3));
 }
 
+TEST(event_filters_page_over_matching_events) {
+  Fixture fixture;
+  const HttpResponse recorded = call(
+      fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"counter-race","seed":6})");
+  const std::int64_t id = parse_body(recorded).find("record")->find("id")->as_i64();
+  const std::string base = "/api/records/" + std::to_string(id) + "/events";
+
+  const HttpResponse steps = call(fixture.workbench, "GET", base, "type=Step&limit=500");
+  CHECK_EQ(steps.status, 200);
+  const json::Value steps_body = parse_body(steps);
+  CHECK(steps_body.find("filtered")->as_bool());
+  CHECK(steps_body.find("total")->as_i64() > 0);
+  for (const auto& event : steps_body.find("events")->items()) {
+    CHECK_EQ(event.find("type")->as_string(), std::string("Step"));
+  }
+
+  const HttpResponse page = call(fixture.workbench, "GET", base, "type=Step&from=1&limit=1");
+  CHECK_EQ(page.status, 200);
+  CHECK_EQ(parse_body(page).find("events")->items().size(), std::size_t(1));
+
+  const HttpResponse task = call(fixture.workbench, "GET", base, "task=2&limit=500");
+  CHECK_EQ(task.status, 200);
+  for (const auto& event : parse_body(task).find("events")->items()) {
+    CHECK_EQ(event.find("task")->as_i64(), 2);
+  }
+
+  CHECK_EQ(call(fixture.workbench, "GET", base, "type=Nope").status, 400);
+  CHECK_EQ(call(fixture.workbench, "GET", base, "task=not-a-number").status, 400);
+}
+
 TEST(api_rejects_bad_inputs) {
   Fixture fixture;
   CHECK_EQ(call(fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"nope"})").status,

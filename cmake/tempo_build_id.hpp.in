@@ -1,0 +1,13 @@
+#pragma once
+
+#include <string_view>
+
+namespace tempo {
+
+/// SHA-256 over the built-in scenario implementation sources, generated at
+/// configure time. Records stamp this id so replay can warn when the scenario
+/// code changed. Embedders can supply their own build id via ScenarioInfo or
+/// RecordRunOptions.
+inline constexpr std::string_view kScenarioBuildId = "@TEMPO_SCENARIO_BUILD_ID@";
+
+}  // namespace tempo

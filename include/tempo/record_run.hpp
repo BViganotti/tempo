@@ -22,6 +22,8 @@ struct RecordRunOptions {
   /// recording. At `mutate_step`, the recorder picks another ready task.
   std::uint64_t mutate_step = kNoMutation;
   std::uint32_t mutate_choice = 0;
+  /// Optional scenario/source build id stored in record metadata.
+  std::string build_id;
 };
 
 struct RecordRunResult {

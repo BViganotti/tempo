@@ -109,6 +109,9 @@ RecordRunResult record_run(std::string scenario_name, std::function<Task(Context
   result.record.meta.seed = options.seed;
   result.record.meta.start_ns = options.start_ns;
   result.record.meta.created_unix = static_cast<std::uint64_t>(std::time(nullptr));
+  if (!options.build_id.empty()) {
+    result.record.meta.attributes["build_id"] = options.build_id;
+  }
   if (options.mutate_step != kNoMutation) {
     result.record.meta.attributes["mutate_step"] = std::to_string(options.mutate_step);
     result.record.meta.attributes["mutate_choice"] = std::to_string(options.mutate_choice);

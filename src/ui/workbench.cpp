@@ -543,6 +543,10 @@ Value Workbench::replay_json(RecordId id, const ReplayOutcome& outcome, std::uin
   value["recordId"] = number(id);
   value["runs"] = number(runs);
   value["mutationApplied"] = Value(outcome.batch ? false : outcome.single.mutation_applied);
+  value["buildMismatch"] = Value(outcome.batch ? false : outcome.single.build_mismatch);
+  if (!outcome.batch && !outcome.single.build_warning.empty()) {
+    value["buildWarning"] = jstr(outcome.single.build_warning);
+  }
   if (!outcome.error.empty()) {
     value["error"] = jstr(outcome.error);
   }
@@ -1136,6 +1140,7 @@ Workbench::RecordOutcome Workbench::record_scenario(std::string_view scenario_na
   record_options.seed = seed;
   record_options.mutate_step = mutate_step;
   record_options.mutate_choice = mutate_choice;
+  record_options.build_id = scenario->build_id;
   RecordRunResult run = record_run(scenario->name, scenario->entry, host, record_options);
   outcome.summary = run.summary;
   if (!run.error.empty()) {
@@ -1286,6 +1291,9 @@ Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
   if (scenario == nullptr) {
     outcome.error = "scenario is not registered: " + record->meta.scenario;
     return outcome;
+  }
+  if (options.expected_build_id.empty()) {
+    options.expected_build_id = scenario->build_id;
   }
   const std::uint32_t capped = std::clamp<std::uint32_t>(runs, 1, limits::kMaxReplayRuns);
   if (capped > 1) {

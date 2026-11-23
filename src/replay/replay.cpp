@@ -248,6 +248,16 @@ ReplayReport replay_record(const Record& record, std::function<Task(Context)> en
   ReplayReport report;
   report.recorded_hash = record.hash;
   report.recorded_events = record.events.size();
+  if (!options.expected_build_id.empty()) {
+    const auto it = record.meta.attributes.find("build_id");
+    if (it != record.meta.attributes.end() && !it->second.empty() &&
+        it->second != options.expected_build_id) {
+      report.build_mismatch = true;
+      report.build_warning = "record build id " + it->second +
+                             " does not match the registered scenario build id " +
+                             options.expected_build_id;
+    }
+  }
   if (!record.complete) {
     report.error = "cannot replay an incomplete record";
     return report;

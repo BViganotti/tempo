@@ -19,6 +19,9 @@ struct ReplayOptions {
   std::uint32_t mutate_choice = 0;
   std::uint32_t max_steps = limits::kMaxSteps;
   std::uint32_t max_tasks = limits::kMaxTasks;
+  /// When non-empty and the record carries a different build id, replay still
+  /// runs but reports a warning. Empty disables the check.
+  std::string expected_build_id;
 };
 
 /// The first place a replay stopped matching its record.
@@ -47,6 +50,8 @@ struct ReplayReport {
   std::size_t replayed_events = 0;
   std::size_t compared_events = 0;
   std::string error;
+  bool build_mismatch = false;
+  std::string build_warning;
   Divergence first_divergence;
   RunSummary summary;
 };

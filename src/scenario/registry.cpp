@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "scenario/demo.hpp"
+#include "tempo_build_id.hpp"
 
 namespace tempo {
 
@@ -37,19 +38,22 @@ const ScenarioRegistry& ScenarioRegistry::builtins() {
         "Two tasks race on a shared counter with a yield between read and write. "
         "The recorded schedule loses updates; replay proves the failure is stable.",
         {},
-        scenarios::counter_race});
+        scenarios::counter_race,
+        std::string(kScenarioBuildId)});
     built.add(ScenarioInfo{
         "flaky-service",
         "A cooperative service reads a fixture, an environment variable and a "
         "random draw, then two tasks race on shared state.",
         {{"fixtures/service.conf", "mode=recorded\nretries=2\nwindow_ms=5\n"}},
-        scenarios::flaky_service});
+        scenarios::flaky_service,
+        std::string(kScenarioBuildId)});
     built.add(ScenarioInfo{
         "pipeline",
         "Three pipeline stages with virtual sleeps and joins, useful for the "
         "timeline view.",
         {},
-        scenarios::pipeline});
+        scenarios::pipeline,
+        std::string(kScenarioBuildId)});
     return built;
   }();
   return registry;

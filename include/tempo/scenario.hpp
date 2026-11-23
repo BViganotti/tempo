@@ -17,6 +17,9 @@ struct ScenarioInfo {
   /// content). Paths follow the same sandbox rules as the file capability.
   std::vector<std::pair<std::string, std::string>> fixtures;
   std::function<Task(Context)> entry;
+  /// Optional source/build fingerprint stamped into records and checked by
+  /// replay. Built-ins use the generated scenario SHA-256.
+  std::string build_id;
 };
 
 /// Ordered collection of scenarios. Copyable; the entries are std::function so

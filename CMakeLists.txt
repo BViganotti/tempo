@@ -97,6 +97,18 @@ add_custom_command(
 add_custom_target(tempo_assets DEPENDS ${TEMPO_UI_HEADER})
 add_dependencies(tempo tempo_assets)
 
+# Scenario build fingerprint: records stamp it, replay warns on mismatch.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/scenario/demo.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/scenario/registry.cpp)
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/src/scenario/demo.cpp _tempo_demo_sha)
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/src/scenario/registry.cpp _tempo_registry_sha)
+string(SHA256 TEMPO_SCENARIO_BUILD_ID "${_tempo_demo_sha};${_tempo_registry_sha}")
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tempo_build_id.hpp.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/tempo_build_id.hpp
+  @ONLY)
+
 include(CTest)
 enable_testing()
 

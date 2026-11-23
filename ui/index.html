@@ -10,6 +10,7 @@
 <script defer src="/app.js"></script>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to workbench</a>
 <div id="app">
   <header class="topbar">
     <div class="brand">
@@ -20,7 +21,7 @@
       </div>
     </div>
     <div class="top-right">
-      <span id="status" class="status">connecting</span>
+      <span id="status" class="status" role="status" aria-live="polite">connecting</span>
       <span id="session-hash" class="mono dim"></span>
     </div>
   </header>
@@ -56,6 +57,11 @@
           <h2>Records</h2><span id="record-count" class="badge">0</span>
         </div>
         <ul id="records" class="records"></ul>
+        <div class="archive-row">
+          <select id="archive-select" aria-label="Archived records"></select>
+          <button id="archive-load">Load</button>
+        </div>
+        <p class="hint" id="archive-note"></p>
       </section>
 
       <section class="panel">
@@ -71,7 +77,7 @@
       </section>
     </aside>
 
-    <main class="main">
+    <main class="main" id="main" tabindex="-1">
       <section class="panel controls">
         <div class="controls-left">
           <button id="first" class="icon" title="First event" aria-label="First event">⏮</button>
@@ -103,7 +109,7 @@
           </span>
         </div>
         <div class="timeline-wrap">
-          <canvas id="timeline" height="220"></canvas>
+          <canvas id="timeline" height="220" role="img" aria-label="Task timeline with event ticks. The event table below provides the same events as text.">Timeline requires canvas. Use the event table for step-by-step navigation.</canvas>
         </div>
         <p id="timeline-note" class="hint"></p>
       </section>

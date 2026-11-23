@@ -14,11 +14,14 @@
   const state = {
     scenarios: [],
     records: [],
+    archive: [],
     breakpoints: [],
     current: null,
     record: null,
     events: [],
     windowFrom: 0,
+    eventsTotal: 0,
+    filter: { type: "", task: "" },
     total: 0,
     index: 0,
     frame: null,
@@ -144,6 +147,23 @@
       });
       list.appendChild(li);
     }
+  }
+
+  function renderArchive() {
+    const select = $("archive-select");
+    const previous = select.value;
+    select.replaceChildren();
+    for (const entry of state.archive) {
+      const option = el("option", "", entry.file + (entry.size ? " (" + Math.ceil(entry.size / 1024) + " KiB)" : ""));
+      option.value = entry.file;
+      select.appendChild(option);
+    }
+    if (previous) select.value = previous;
+    select.disabled = state.archive.length === 0;
+    $("archive-load").disabled = state.archive.length === 0;
+    $("archive-note").textContent = state.archive.length
+      ? state.archive.length + " record(s) archived on disk"
+      : "";
   }
 
   function renderBreakpoints() {
@@ -342,6 +362,8 @@
     }
     for (const event of state.events) {
       const row = el("tr");
+      row.tabIndex = 0;
+      row.setAttribute("aria-selected", event.i === state.index ? "true" : "false");
       if (event.i === state.index) row.classList.add("selected");
       if (state.divergence && event.i === state.divergence.index) row.classList.add("divergent");
       row.appendChild(el("td", "num", event.i));
@@ -351,10 +373,22 @@
       row.appendChild(el("td", "time", fmtNs(event.time)));
       row.appendChild(el("td", "summary", event.summary));
       row.addEventListener("click", () => setIndex(event.i));
+      row.addEventListener("keydown", (keyEvent) => {
+        if (keyEvent.key === "Enter" || keyEvent.key === " ") {
+          keyEvent.preventDefault();
+          setIndex(event.i);
+        }
+      });
       body.appendChild(row);
     }
-    const end = Math.min(state.total, state.windowFrom + state.events.length);
-    $("event-page").textContent = "showing " + (state.total ? state.windowFrom + 1 : 0) + "–" + end + " of " + state.total;
+    if (state.filter.type || state.filter.task) {
+      $("event-page").textContent =
+        state.events.length + " shown, " + state.eventsTotal + " matching of " + state.total;
+    } else {
+      const end = Math.min(state.total, state.windowFrom + state.events.length);
+      $("event-page").textContent =
+        "showing " + (state.total ? state.windowFrom + 1 : 0) + "–" + end + " of " + state.total;
+    }
   }
 
   function drawTimeline() {
@@ -469,8 +503,10 @@
     state.scenarios = data.scenarios || [];
     state.records = data.records || [];
     state.breakpoints = data.breakpoints || [];
+    state.archive = data.archive || [];
     renderScenarioOptions();
     renderRecords();
+    renderArchive();
     renderBreakpoints();
     updateDiffOptions();
     if (!state.records.length) {
@@ -529,6 +565,10 @@
     state.windowFrom = 0;
     state.total = meta.events;
     state.timeline = null;
+    state.filter = { type: "", task: "" };
+    $("filter-type").value = "";
+    $("filter-task").value = "";
+    state.eventsTotal = 0;
     state.index = 0;
     state.lastReplay = null;
     state.divergence = null;
@@ -554,16 +594,40 @@
     drawTimeline();
   }
 
+  function filterActive() {
+    return Boolean(state.filter.type || state.filter.task);
+  }
+
   async function loadWindow(center) {
     const limit = 300;
     const total = state.total;
     let from = clamp(center - Math.floor(limit / 2), 0, Math.max(0, total - 1));
     from = Math.max(0, Math.min(from, total - limit));
-    const data = await api("/api/records/" + state.current + "/events?from=" + from + "&limit=" + limit);
+    let path = "/api/records/" + state.current + "/events?limit=" + limit + "&from=" + from;
+    if (filterActive()) {
+      path = "/api/records/" + state.current + "/events?limit=500&from=0";
+      if (state.filter.type) path += "&type=" + encodeURIComponent(state.filter.type);
+      if (state.filter.task) path += "&task=" + encodeURIComponent(state.filter.task);
+    }
+    const data = await api(path);
     state.events = data.events || [];
     state.windowFrom = data.from || 0;
-    state.total = data.total;
+    state.eventsTotal = data.total || 0;
+    if (!filterActive()) state.total = data.total;
     renderEvents();
+  }
+
+  async function applyEventFilter() {
+    state.filter.type = $("filter-type").value;
+    state.filter.task = $("filter-task").value.trim();
+    await loadWindow(0);
+  }
+
+  async function clearEventFilter() {
+    state.filter = { type: "", task: "" };
+    $("filter-type").value = "";
+    $("filter-task").value = "";
+    await loadWindow(state.index);
   }
 
   async function setIndex(index, options = {}) {
@@ -576,7 +640,9 @@
     scrub.max = String(total - 1);
     scrub.value = String(next);
     $("index-label").textContent = (next + 1) + " / " + total;
-    if (!state.events.length || next < state.windowFrom || next >= state.windowFrom + state.events.length) {
+    if (!filterActive() &&
+        (!state.events.length || next < state.windowFrom ||
+         next >= state.windowFrom + state.events.length)) {
       await loadWindow(next);
     } else {
       renderEvents();
@@ -753,6 +819,24 @@
     }
   }
 
+  async function loadArchivedRecord() {
+    const file = $("archive-select").value;
+    if (!file) { toast("No archived record selected.", true); return; }
+    setStatus("loading", "busy");
+    try {
+      const data = await api("/api/records/open", {
+        method: "POST",
+        body: JSON.stringify({ file })
+      });
+      toast("Loaded " + file + ".");
+      await loadOverview(data.record ? data.record.id : null);
+      setStatus("live", "live");
+    } catch (error) {
+      setStatus("error", "error");
+      toast("Archive load failed: " + error.message, true);
+    }
+  }
+
   async function deleteCurrentRecord() {
     if (!state.current) { toast("No record selected.", true); return; }
     if (!confirm("Delete record #" + state.current + " and its .tmpo file?")) return;
@@ -817,10 +901,13 @@
       runReplay(1, step, choice);
     });
     $("bp-form").addEventListener("submit", addBreakpoint);
+    $("filter-apply").addEventListener("click", () => applyEventFilter().catch((error) => toast(error.message, true)));
+    $("filter-clear").addEventListener("click", () => clearEventFilter().catch((error) => toast(error.message, true)));
     $("bp-clear").addEventListener("click", clearBreakpoints);
     $("import-btn").addEventListener("click", () => $("import-file").click());
     $("import-file").addEventListener("change", importRecord);
     $("delete-record").addEventListener("click", deleteCurrentRecord);
+    $("archive-load").addEventListener("click", loadArchivedRecord);
     $("diff-btn").addEventListener("click", loadDiff);
     $("timeline").addEventListener("click", (event) => {
       if (!state.record || !state.total) return;
@@ -851,7 +938,9 @@
       api("/api/overview").then((data) => {
         state.records = data.records || [];
         state.breakpoints = data.breakpoints || [];
+        state.archive = data.archive || [];
         renderRecords();
+        renderArchive();
         renderBreakpoints();
         updateDiffOptions();
       }).catch(() => {});
@@ -877,6 +966,11 @@
       const option = el("option", "", name);
       option.value = name;
       typeSelect.appendChild(option);
+    }
+    for (const name of EVENT_TYPES) {
+      const option = el("option", "", name);
+      option.value = name;
+      $("filter-type").appendChild(option);
     }
     bindEvents();
     setStatus("connecting", "busy");

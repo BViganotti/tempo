@@ -51,6 +51,7 @@ add_library(tempo STATIC
   src/ui/json.cpp
   src/ui/http.cpp
   src/ui/assets.cpp
+  src/ui/workbench.cpp
   src/scenario/registry.cpp
   src/scenario/demo.cpp
 )
@@ -95,6 +96,10 @@ add_custom_command(
 add_custom_target(tempo_assets DEPENDS ${TEMPO_UI_HEADER})
 add_dependencies(tempo tempo_assets)
 
+add_executable(tempo_workbench app/main.cpp)
+target_link_libraries(tempo_workbench PRIVATE tempo)
+target_compile_options(tempo_workbench PRIVATE ${TEMPO_WARNINGS})
+
 include(CTest)
 enable_testing()
 
@@ -126,6 +131,7 @@ if(BUILD_TESTING)
   tempo_add_test(json_test)
   tempo_add_test(http_test)
   tempo_add_test(scenario_test)
+  tempo_add_test(workbench_test)
   tempo_add_test(task_test)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)

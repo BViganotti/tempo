@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Tempo — deterministic record/replay</title>
+<link id="favicon" rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div>
+        <h1>Tempo</h1>
+        <p>deterministic record / replay workbench</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="status" class="status">connecting</span>
+      <span id="session-hash" class="mono dim"></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>Record</h2>
+        <label class="field">Scenario
+          <select id="scenario"></select>
+        </label>
+        <label class="field">Seed
+          <input id="seed" type="number" min="0" step="1" value="7">
+        </label>
+        <div class="row">
+          <label class="field compact">Alter step
+            <input id="record-mutate-step" type="number" min="0" placeholder="none">
+          </label>
+          <label class="field compact">Choice
+            <input id="record-mutate-choice" type="number" min="0" value="0">
+          </label>
+        </div>
+        <button id="record-btn" class="primary wide">Record run</button>
+        <p id="scenario-note" class="hint"></p>
+      </section>
+
+      <section class="panel grow">
+        <div class="panel-head">
+          <h2>Records</h2><span id="record-count" class="badge">0</span>
+        </div>
+        <ul id="records" class="records"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Breakpoints</h2><span class="hint">event log</span></div>
+        <form id="bp-form" class="bp-form">
+          <select id="bp-type" aria-label="breakpoint type"></select>
+          <input id="bp-task" type="number" min="0" placeholder="task id">
+          <input id="bp-text" type="text" maxlength="128" placeholder="text match">
+          <button class="wide">Add breakpoint</button>
+        </form>
+        <ul id="breakpoints" class="breakpoints"></ul>
+      </section>
+    </aside>
+
+    <main class="main">
+      <section class="panel controls">
+        <div class="controls-left">
+          <button id="first" class="icon" title="First event" aria-label="First event">⏮</button>
+          <button id="prev" class="icon" title="Step back" aria-label="Step back">◀</button>
+          <button id="next" class="icon" title="Step forward" aria-label="Step forward">▶</button>
+          <button id="last" class="icon" title="Last event" aria-label="Last event">⏭</button>
+          <span id="index-label" class="mono index-label">0 / 0</span>
+        </div>
+        <input id="scrub" class="scrub" type="range" min="0" max="0" value="0" aria-label="Event index">
+        <div class="controls-right">
+          <button id="run-bp" title="Run forward to the next breakpoint">Breakpoint ▶</button>
+          <button id="run-bp-back" title="Run backward to the previous breakpoint">◀ Breakpoint</button>
+          <button id="replay" class="primary">Replay</button>
+          <button id="replay100">Replay ×100</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Timeline</h2>
+          <span class="legend">
+            <i class="dot step"></i>step
+            <i class="dot life"></i>lifecycle
+            <i class="dot cap"></i>capability
+            <i class="dot state"></i>state
+            <i class="dot bad"></i>divergence
+          </span>
+        </div>
+        <div class="timeline-wrap">
+          <canvas id="timeline" height="220"></canvas>
+        </div>
+        <p id="timeline-note" class="hint"></p>
+      </section>
+
+      <section class="split">
+        <div class="panel events-panel">
+          <div class="panel-head"><h2>Events</h2><span id="event-page" class="hint"></span></div>
+          <div class="table-wrap">
+            <table id="events">
+              <thead><tr><th>#</th><th>Type</th><th>Task</th><th>Time</th><th>Summary</th></tr></thead>
+              <tbody id="event-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel inspector-panel">
+          <div class="panel-head"><h2>Inspector</h2><span id="frame-badge" class="badge hidden">divergence</span></div>
+          <div id="event-detail" class="detail"></div>
+          <h3>Watch state</h3>
+          <div id="watch-state" class="watch-state"></div>
+        </div>
+      </section>
+
+      <section class="panel results">
+        <div class="panel-head"><h2>Replay &amp; divergence</h2><span id="replay-note" class="hint"></span></div>
+        <div id="replay-result" class="result-grid"></div>
+        <div class="mutate-row">
+          <label class="field compact">Alter step
+            <input id="mutate-step" type="number" min="0" value="1">
+          </label>
+          <label class="field compact">Choice
+            <input id="mutate-choice" type="number" min="0" value="0">
+          </label>
+          <button id="mutate-btn">Replay altered schedule</button>
+        </div>
+        <div id="divergence" class="divergence"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Run diff</h2>
+          <div class="row">
+            <select id="diff-other" aria-label="Other record"></select>
+            <button id="diff-btn">Compare</button>
+          </div>
+        </div>
+        <div id="diff-result" class="diff"></div>
+      </section>
+    </main>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -41,6 +41,9 @@ struct Record {
 
   std::uint64_t compute_hash() const noexcept;
   std::uint64_t recompute_hash() noexcept;
+  /// Conservative heap estimate for the event graph, used by the workbench to
+  /// enforce a global memory budget. Counts container capacity and strings.
+  std::size_t approximate_bytes() const noexcept;
   /// 16 lowercase hex characters of `hash`.
   std::string hash_hex() const;
   std::uint32_t event_count() const noexcept {

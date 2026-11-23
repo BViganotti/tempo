@@ -198,6 +198,9 @@ Workbench::Workbench(WorkbenchOptions options) : options_(std::move(options)) {
   if (options_.max_records > 64) {
     options_.max_records = 64;
   }
+  if (options_.max_total_bytes == 0) {
+    options_.max_total_bytes = 256u * 1024u * 1024u;
+  }
 }
 
 Workbench::~Workbench() = default;
@@ -251,15 +254,35 @@ bool Workbench::initialize(std::string* error) {
   if (files.size() > options_.max_records) {
     files.erase(files.begin(), files.end() - static_cast<std::ptrdiff_t>(options_.max_records));
   }
-  for (const auto& path : files) {
-    const LoadOutcome loaded = load_record_file(path.string(), LoadMode::Recover);
+  struct LoadedFile {
+    Record record;
+    std::string path;
+  };
+  std::vector<LoadedFile> loaded_files;
+  std::size_t loaded_bytes = 0;
+  std::uint64_t known_hashes[512];
+  std::size_t known_hash_count = 0;
+  for (auto it = files.rbegin(); it != files.rend(); ++it) {
+    if (loaded_files.size() >= options_.max_records) {
+      load_warnings_.push_back("older records kept on disk outside the memory cap: " +
+                               it->filename().string());
+      continue;
+    }
+    std::error_code size_error;
+    const auto file_size = std::filesystem::file_size(*it, size_error);
+    if (!size_error && file_size > options_.max_total_bytes - loaded_bytes) {
+      load_warnings_.push_back("skipped " + it->filename().string() +
+                               ": file exceeds the remaining workbench memory budget");
+      continue;
+    }
+    const LoadOutcome loaded = load_record_file(it->string(), LoadMode::Recover);
     if (!loaded.ok) {
-      load_warnings_.push_back("skipped " + path.filename().string() + ": " + loaded.error);
+      load_warnings_.push_back("skipped " + it->filename().string() + ": " + loaded.error);
       continue;
     }
     bool duplicate = false;
-    for (const auto& existing : records_) {
-      if (existing.record && existing.record->hash == loaded.record.hash) {
+    for (std::size_t i = 0; i < known_hash_count; ++i) {
+      if (known_hashes[i] == loaded.record.hash) {
         duplicate = true;
         break;
       }
@@ -267,27 +290,33 @@ bool Workbench::initialize(std::string* error) {
     if (duplicate) {
       continue;
     }
-    auto shared = std::make_shared<Record>(loaded.record);
+    const std::size_t estimate = loaded.record.approximate_bytes();
+    if (loaded_bytes + estimate > options_.max_total_bytes) {
+      load_warnings_.push_back("skipped " + it->filename().string() +
+                               ": record exceeds the workbench memory budget");
+      continue;
+    }
+    loaded_bytes += estimate;
+    if (known_hash_count < 512) {
+      known_hashes[known_hash_count++] = loaded.record.hash;
+    }
+    loaded_files.push_back(LoadedFile{loaded.record, it->string()});
+    if (!loaded.record.complete && !loaded.record.warning.empty()) {
+      load_warnings_.push_back(it->filename().string() + ": " + loaded.record.warning);
+    }
+  }
+  std::reverse(loaded_files.begin(), loaded_files.end());
+  for (auto& loaded : loaded_files) {
+    auto shared = std::make_shared<Record>(std::move(loaded.record));
     StoredRecord stored;
     stored.id = next_record_id_++;
     stored.record = std::move(shared);
-    stored.file = path.string();
+    stored.file = std::move(loaded.path);
     stored.saved = true;
     stored.created_unix = stored.record->meta.created_unix;
+    stored.memory_bytes = stored.record->approximate_bytes();
+    used_bytes_ += stored.memory_bytes;
     records_.push_back(std::move(stored));
-    if (!loaded.record.complete && !loaded.record.warning.empty()) {
-      load_warnings_.push_back(path.filename().string() + ": " + loaded.record.warning);
-    }
-  }
-  std::sort(records_.begin(), records_.end(), [](const StoredRecord& a, const StoredRecord& b) {
-    if (a.created_unix != b.created_unix) {
-      return a.created_unix < b.created_unix;
-    }
-    return a.id < b.id;
-  });
-  while (records_.size() > options_.max_records) {
-    sessions_.erase(records_.front().id);
-    records_.erase(records_.begin());
   }
   if (!records_.empty()) {
     last_record_ = records_.back().id;
@@ -368,6 +397,8 @@ Value Workbench::record_json(const StoredRecord& stored) const {
   value["hash"] = jstr(record.hash_hex());
   value["hashShort"] = jstr(hash_short(record));
   value["createdUnix"] = number(stored.created_unix);
+  value["memoryBytes"] = number(static_cast<std::uint64_t>(stored.memory_bytes));
+  value["uid"] = jstr(record.hash_hex());
   value["complete"] = Value(record.complete);
   value["recovered"] = Value(record.recovered);
   value["toolVersion"] = jstr(record.meta.tool_version);
@@ -398,6 +429,8 @@ Value Workbench::overview_json() const {
   Value value = Value::object();
   value["version"] = jstr(kVersion);
   value["lastRecord"] = number(last_record_);
+  value["memoryUsed"] = number(static_cast<std::uint64_t>(used_bytes_));
+  value["memoryBudget"] = number(static_cast<std::uint64_t>(options_.max_total_bytes));
   Value scenarios = Value::array();
   for (const auto& scenario : ScenarioRegistry::builtins().list()) {
     Value item = Value::object();
@@ -595,6 +628,8 @@ HttpResponse Workbench::handle_api(const HttpRequest& request) {
     result["version"] = jstr(kVersion);
     result["initialized"] = Value(initialized_);
     result["records"] = number(static_cast<std::uint64_t>(records_.size()));
+    result["memoryUsed"] = number(static_cast<std::uint64_t>(used_bytes_));
+    result["memoryBudget"] = number(static_cast<std::uint64_t>(options_.max_total_bytes));
     return json_response(result);
   }
 
@@ -1094,7 +1129,7 @@ Workbench::RecordOutcome Workbench::record_scenario(std::string_view scenario_na
   outcome.run_ok = run.summary.ok;
   RecordId id = add_record(std::move(run.record), run.summary);
   if (id == 0) {
-    outcome.error = "record could not be stored";
+    outcome.error = "record exceeds the workbench memory budget";
     return outcome;
   }
   outcome.ok = true;
@@ -1115,22 +1150,37 @@ RecordId Workbench::add_record(Record record, RunSummary summary) {
   if (shared->meta.created_unix == 0) {
     shared->meta.created_unix = static_cast<std::uint64_t>(std::time(nullptr));
   }
+  const std::size_t estimate = shared->approximate_bytes();
+  if (estimate > options_.max_total_bytes) {
+    load_warnings_.push_back("record rejected: " + std::to_string(estimate) +
+                             " bytes exceeds the " +
+                             std::to_string(options_.max_total_bytes) + " byte budget");
+    return 0;
+  }
+  while (!records_.empty() &&
+         (records_.size() >= options_.max_records ||
+          used_bytes_ + estimate > options_.max_total_bytes)) {
+    sessions_.erase(records_.front().id);
+    used_bytes_ -= records_.front().memory_bytes;
+    records_.erase(records_.begin());
+  }
+  if (used_bytes_ + estimate > options_.max_total_bytes) {
+    return 0;
+  }
   StoredRecord stored;
   stored.id = next_record_id_++;
   stored.record = shared;
   stored.summary = std::move(summary);
   stored.created_unix = shared->meta.created_unix;
+  stored.memory_bytes = estimate;
   std::string warning;
   stored.saved = save_record_file(stored, &warning);
   if (!warning.empty()) {
     load_warnings_.push_back(warning);
   }
+  used_bytes_ += estimate;
   records_.push_back(stored);
   last_record_ = stored.id;
-  while (records_.size() > options_.max_records) {
-    sessions_.erase(records_.front().id);
-    records_.erase(records_.begin());
-  }
   (void)session_for(stored.id);
   return stored.id;
 }
@@ -1324,6 +1374,7 @@ bool Workbench::delete_record(RecordId id, bool delete_file, std::string* error)
     }
   }
   sessions_.erase(id);
+  used_bytes_ -= it->memory_bytes;
   records_.erase(it);
   if (last_record_ == id) {
     last_record_ = records_.empty() ? 0 : records_.back().id;

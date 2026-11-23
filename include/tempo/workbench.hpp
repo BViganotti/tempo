@@ -24,6 +24,10 @@ struct WorkbenchOptions {
   /// the platform default (macOS: ~/Library/Application Support/Tempo).
   std::string data_dir;
   std::size_t max_records = limits::kMaxStoredRecords;
+  /// Global approximate memory budget for retained records. Records are evicted
+  /// oldest-first from memory (files are kept); a single recording larger than
+  /// the budget is rejected rather than silently dropped.
+  std::size_t max_total_bytes = 256u * 1024u * 1024u;
 };
 
 /// A recorded run held by the workbench.
@@ -34,6 +38,7 @@ struct StoredRecord {
   std::string file;
   bool saved = false;
   std::uint64_t created_unix = 0;
+  std::size_t memory_bytes = 0;
 };
 
 /// Local workbench service: record store, replay driver, debugger sessions,
@@ -54,6 +59,8 @@ class Workbench {
   bool initialized() const noexcept { return initialized_; }
   const std::string& data_dir() const noexcept { return options_.data_dir; }
   const std::vector<std::string>& load_warnings() const noexcept { return load_warnings_; }
+  std::size_t retained_bytes() const noexcept { return used_bytes_; }
+  std::size_t memory_budget() const noexcept { return options_.max_total_bytes; }
 
   /// Serve a static asset or API request. Never throws; errors become JSON.
   HttpResponse handle(const HttpRequest& request);
@@ -143,6 +150,7 @@ class Workbench {
   RecordId next_record_id_ = 1;
   RecordId last_record_ = 0;
   std::vector<std::string> load_warnings_;
+  std::size_t used_bytes_ = 0;
   std::function<void(std::string_view, std::string_view)> broadcaster_;
   std::string session_token_;
 };

@@ -39,7 +39,10 @@ scenario (your cooperative C++ code)
    selecting an earlier index. Breakpoints match on event type, task and text.
 7. **UI** (`src/ui`): a poll-based HTTP/1.1 server on `127.0.0.1`, a JSON parser
    and writer with hard limits, SSE for updates, and embedded assets. Every
-   request must present the per-session token and a loopback Host header.
+   request must present the per-session token and a loopback Host header. Long
+   replay batches move to one background job worker with a bounded job map; the
+   worker only touches immutable record snapshots, while the HTTP thread owns the
+   record store and debugger sessions.
 8. **Launcher** (`app/main.cpp`): starts the server, opens the browser, and runs
    until interrupted. It has no interactive terminal workflow.
 
@@ -53,14 +56,22 @@ documented in `LIMITATIONS.md`.
 ## Threading
 
 The core scheduler is single-threaded by contract. The HTTP server uses one
-event-loop thread and no shared mutable state beyond the workbench facade, which
-is only touched by that thread. SSE clients receive immutable snapshots. This is
-verified with TSan.
+event-loop thread; the workbench facade is normally touched only by that thread.
+The single replay job worker is the exception: it reads immutable record
+snapshots and a mutex-protected job map, and never mutates the record store or
+debug sessions. SSE broadcasts use a mutex-protected queue. TSan runs the full
+suite, including the async-job and HTTP integration tests.
 
 ## Bounded resources
 
 Every parser has explicit limits (`include/tempo/limits.hpp`): record size,
-event count, string length, string table size, JSON depth, HTTP request size,
-task count, watch variables, socket payloads and replay steps. Exceeding a limit
-fails cleanly with an error; nothing is silently truncated except where a limit
-explicitly defines truncation for display.
+event count, string length, string table size, JSON depth, HTTP request/response
+size, task count, watch variables, socket payloads and replay steps. Exceeding a
+limit fails cleanly with an error; nothing is silently truncated except where a
+limit explicitly defines truncation for display.
+
+The workbench adds a global approximate memory budget over retained records.
+Records are evicted oldest-first from memory into an on-disk archive when the
+count or byte budget is hit; a single record larger than the budget is rejected.
+On-disk event indexes are written and validated but the reader currently
+materializes events eagerly, which is documented in `LIMITATIONS.md`.

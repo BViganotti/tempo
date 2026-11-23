@@ -38,7 +38,13 @@ int main() {
 `record_run` owns a `Scheduler` and a `RecordingHost`. It returns a `Record` even
 when the scenario fails (unless capture itself hits a hard limit), because a
 failed run is a reproducible fact. `ok` describes capture; `summary.ok` describes
-the run. `Record::hash` is the FNV-1a 64 hash of the canonical event encoding.
+the run. `Record::hash` is the FNV-1a 64 hash of the canonical event encoding;
+`Record::approximate_bytes()` is the memory estimate the workbench budgets.
+
+`RecordRunOptions::build_id` (and `ScenarioInfo::build_id`) stamps a source/build
+fingerprint into metadata. Replay compares it when
+`ReplayOptions::expected_build_id` is set and reports `build_mismatch` /
+`build_warning` without refusing to run.
 
 ## Replaying a record
 
@@ -60,6 +66,11 @@ continues in a safe fallback mode so it can finish rather than crash.
 
 `replay_many(record, entry, runs)` returns hash stability across runs (max 200).
 
+For UI use, `Workbench::enqueue_replay` runs a batch on one background worker.
+`job_status`/`jobs_json` expose a bounded mutex-protected job map; the worker only
+touches immutable record snapshots and registered scenario functions, never the
+record store.
+
 ## Tasks and contexts
 
 - `Task` is a move-only coroutine type returned by functions taking `Context`.
@@ -79,6 +90,10 @@ continues in a safe fallback mode so it can finish rather than crash.
   `connect/send/recv/close_socket`, and `random_u64()` are mediated capabilities.
 - `ctx.cancel(id)` requests cancellation; `ctx.cancelled()` and
   `ctx.check_cancelled()` observe it.
+- `ctx.sleep_until_ns(deadline)` sleeps to an absolute virtual deadline.
+- `ctx.watch` supports string, integral, double and bool values; doubles are
+  formatted with the classic locale, so a host calling `setlocale` cannot change
+  recorded text.
 
 Awaitables throw `CancelledError` when a cancelled task resumes. An uncaught
 exception fails the task, emits `Error` + `Exit`, and wakes joiners with `false`.
@@ -89,7 +104,8 @@ exception fails the task, emits `Error` + `Exit`, and wakes joiners with `false`
 `max_virtual_ns`. The scheduler emits events through `RunHost::emit`; the host
 also chooses from the ready queue and provides capabilities. `RunHost` is a
 pure interface, so embedding applications can implement an in-memory host with
-no OS access (see `examples/tempo_demo`).
+no OS access (see `examples/tempo_demo`). `Scheduler::task_name` and
+`task_count` expose introspection.
 
 `SystemHost` implements the real effects with a sandboxed file root, optional
 environment access, loopback-only sockets and bounded timeouts. It is used by
@@ -97,8 +113,8 @@ the recorder; the replay host never touches the OS.
 
 ## Records
 
-`RecordMeta` stores the scenario name, seed, tool version, creation time, start
-time and arbitrary attributes. `Record` stores events, the determinism hash and
+`RecordMeta` stores the scenario name, seed, tool version, build id, creation
+time, start time and arbitrary attributes. `Record` stores events, the determinism hash and
 completeness flags. `serialize_record` produces a portable container;
 `write_record_file` writes atomically (`temp + rename`, `fsync`).
 `load_record_file`/`load_record_bytes` parse untrusted input under strict limits.
@@ -119,6 +135,25 @@ name. `next_breakpoint(from, forward)` implements both directions.
 `diff_records(a, b)` reports equality, the common prefix, the first differing
 event with summaries, per-type counts, and both hashes. It compares event
 streams, not files, so formatting differences cannot mask a semantic change.
+
+## Workbench
+
+`WorkbenchOptions` sets the data directory, the record count cap, and a global
+approximate memory budget. Records are evicted oldest-first from memory into an
+`archive_files_` list when either cap is hit; files stay on disk and
+`open_archived` reloads one by basename. `import_record` is idempotent by hash,
+and `delete_record` can remove both memory and file. All of this is driven by the
+HTTP API documented in `docs/WORKBENCH.md`.
+
+`Workbench` is not thread-safe for record-store mutation. The background replay
+worker is deliberately restricted to immutable snapshots and the job map; long
+record/import operations still run on the HTTP thread.
+
+## Formatting
+
+`include/tempo/format.hpp` provides locale-independent general, fixed and JSON
+number formatting. Persisted/recorded text never depends on the global C++
+locale.
 
 ## JSON and HTTP
 

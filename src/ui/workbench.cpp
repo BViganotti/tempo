@@ -108,6 +108,20 @@ std::uint64_t event_time(const Event& event) {
   }
 }
 
+void tighten_directory(const std::filesystem::path& path) noexcept {
+  std::error_code ec;
+  std::filesystem::permissions(path, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+}
+
+void tighten_file(const std::filesystem::path& path) noexcept {
+  std::error_code ec;
+  std::filesystem::permissions(path,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace, ec);
+}
+
 std::string slugify(std::string_view name) {
   std::string out;
   for (char c : name) {
@@ -200,6 +214,7 @@ bool Workbench::initialize(std::string* error) {
     }
     return false;
   }
+  tighten_directory(options_.data_dir);
   std::filesystem::path records_dir = std::filesystem::path(options_.data_dir) / "records";
   std::filesystem::create_directories(records_dir, ec);
   if (ec) {
@@ -208,6 +223,7 @@ bool Workbench::initialize(std::string* error) {
     }
     return false;
   }
+  tighten_directory(records_dir);
 
   std::vector<std::filesystem::path> files;
   for (std::filesystem::directory_iterator it(records_dir, ec), end; it != end;
@@ -1171,6 +1187,7 @@ bool Workbench::prepare_fixtures(const ScenarioInfo& scenario, std::string* erro
       if (error) *error = "cannot create fixture directory: " + ec.message();
       return false;
     }
+    tighten_directory(full.parent_path());
     std::ofstream out(full, std::ios::binary | std::ios::trunc);
     if (!out) {
       if (error) *error = "cannot write fixture: " + relative;
@@ -1181,6 +1198,8 @@ bool Workbench::prepare_fixtures(const ScenarioInfo& scenario, std::string* erro
       if (error) *error = "fixture write failed: " + relative;
       return false;
     }
+    out.close();
+    tighten_file(full);
   }
   return true;
 }

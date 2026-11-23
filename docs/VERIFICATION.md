@@ -20,7 +20,7 @@ ctest --test-dir build --output-on-failure
 
 Result: build completed with zero warnings under
 `-Wall -Wextra -Wpedantic -Werror -Wshadow -Wnon-virtual-dtor
--Woverloaded-virtual -Wunused -Wformat=2`; **35/35 tests passed**.
+-Woverloaded-virtual -Wunused -Wformat=2`; **37/37 tests passed**.
 
 ## ASan + UBSan
 
@@ -30,7 +30,7 @@ cmake --build build-asan -j
 ctest --test-dir build-asan --output-on-failure
 ```
 
-Result: **35/35 tests passed**. The sanitizer found two real issues during
+Result: **37/37 tests passed**. The sanitizer found two real issues during
 development, both fixed before the final run:
 
 1. `json::Value::dump` cast a large double to `int64_t` before range checking
@@ -46,7 +46,7 @@ cmake --build build-tsan -j
 ctest --test-dir build-tsan --output-on-failure
 ```
 
-Result: **35/35 tests passed**, including `integration_test`, which runs the
+Result: **37/37 tests passed**, including `integration_test`, which runs the
 HTTP accept/read/route/SSE loop on a thread and drives it from clients. The SSE
 broadcast queue is the only cross-thread state and is mutex-protected.
 

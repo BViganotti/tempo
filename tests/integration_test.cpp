@@ -69,6 +69,18 @@ std::string http_exchange(std::uint16_t port, const std::string& request) {
   return response;
 }
 
+HttpResponse direct_call(Workbench& workbench, const std::string& method,
+                         const std::string& path, const std::string& body = {}) {
+  HttpRequest request;
+  request.method = method;
+  request.path = path;
+  request.target = path;
+  request.body = body;
+  request.version = "HTTP/1.1";
+  request.headers["host"] = "127.0.0.1:1";
+  return workbench.handle(request);
+}
+
 int status_of(const std::string& response) {
   if (response.size() < 12) return 0;
   return std::stoi(response.substr(9, 3));
@@ -164,6 +176,78 @@ TEST(workbench_serves_ui_api_and_sse_over_the_real_server) {
   stop = true;
   thread.join();
   server.stop();
+}
+
+TEST(import_and_download_work_over_the_real_server) {
+  test::TempDir source_dir;
+  RecordId source_id = 0;
+  std::vector<std::uint8_t> container;
+  {
+    Workbench source(WorkbenchOptions{.data_dir = source_dir.path()});
+    std::string error;
+    CHECK(source.initialize(&error));
+    const HttpResponse recorded = direct_call(source, "POST", "/api/record",
+                                       R"({"scenario":"counter-race","seed":12})");
+    CHECK_EQ(recorded.status, 200);
+    source_id = source.records().front().id;
+    const HttpResponse download = direct_call(
+        source, "GET", "/api/records/" + std::to_string(source_id) + "/download");
+    CHECK_EQ(download.status, 200);
+    container.assign(download.body.begin(), download.body.end());
+  }
+
+  test::TempDir dir;
+  Workbench workbench(WorkbenchOptions{.data_dir = dir.path()});
+  std::string error;
+  CHECK(workbench.initialize(&error));
+  HttpServerOptions options;
+  options.token = "import-token";
+  HttpServer server(options, [&workbench](const HttpRequest& request) {
+    return workbench.handle(request);
+  });
+  workbench.set_session_token(options.token);
+  CHECK(server.start(&error));
+  std::atomic<bool> stop{false};
+  std::thread thread([&server, &stop] {
+    server.run([&stop] { return stop.load(); });
+  });
+  const std::uint16_t port = server.port();
+  const std::string token = options.token;
+
+  const std::string missing_asset = http_exchange(
+      port, "GET /style.css HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+                "\r\n\r\n");
+  CHECK_EQ(status_of(missing_asset), 403);
+
+  const std::string stylesheet =
+      http_exchange(port, build_request(port, token, "GET", "/style.css"));
+  CHECK_EQ(status_of(stylesheet), 200);
+  CHECK(stylesheet.find("text/css") != std::string::npos);
+
+  std::string import_request;
+  import_request += "POST /api/records/import?token=" + token + " HTTP/1.1\r\n";
+  import_request += "Host: 127.0.0.1:" + std::to_string(port) + "\r\n";
+  import_request += "Content-Type: application/octet-stream\r\n";
+  import_request += "Content-Length: " + std::to_string(container.size()) + "\r\n";
+  import_request += "Connection: close\r\n\r\n";
+  import_request.append(reinterpret_cast<const char*>(container.data()), container.size());
+  const std::string imported = http_exchange(port, import_request);
+  CHECK_EQ(status_of(imported), 200);
+  CHECK(imported.find("\"duplicate\":false") != std::string::npos);
+  CHECK(imported.find("counter-race") != std::string::npos);
+
+  std::string wrong_type;
+  wrong_type += "POST /api/records/import?token=" + token + " HTTP/1.1\r\n";
+  wrong_type += "Host: 127.0.0.1:" + std::to_string(port) + "\r\n";
+  wrong_type += "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+  CHECK_EQ(status_of(http_exchange(port, wrong_type)), 415);
+
+  stop = true;
+  thread.join();
+  server.stop();
+  CHECK_EQ(workbench.records().size(), std::size_t(1));
+  CHECK(!workbench.records().front().record->events.empty());
+  CHECK(workbench.records().front().record->hash != 0);
 }
 
 TEST(integration_rejects_bad_host_and_methods) {

@@ -293,6 +293,114 @@ TEST(batch_replay_api_reports_failed_run) {
   CHECK_EQ(body.find("failedRun")->as_i64(), 0);
 }
 
+TEST(index_injects_the_session_token_into_asset_urls) {
+  Fixture fixture;
+  fixture.workbench.set_session_token("abcdef0123456789");
+  const HttpResponse index = call(fixture.workbench, "GET", "/");
+  CHECK_EQ(index.status, 200);
+  CHECK(index.body.find("href=\"/style.css?token=abcdef0123456789\"") != std::string::npos);
+  CHECK(index.body.find("src=\"/app.js?token=abcdef0123456789\"") != std::string::npos);
+  CHECK(index.body.find("href=\"/favicon.svg?token=abcdef0123456789\"") != std::string::npos);
+  CHECK(index.body.find("href=\"/style.css\"") == std::string::npos);
+}
+
+TEST(health_endpoint_reports_readiness) {
+  Fixture fixture;
+  const HttpResponse response = call(fixture.workbench, "GET", "/api/health");
+  CHECK_EQ(response.status, 200);
+  const json::Value body = parse_body(response);
+  CHECK(body.find("ok")->as_bool());
+  CHECK(body.find("initialized")->as_bool());
+  CHECK_EQ(body.find("records")->as_i64(), 0);
+}
+
+TEST(imports_deduplicates_and_deletes_records) {
+  Fixture fixture;
+  const HttpResponse recorded = call(
+      fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"counter-race","seed":4})");
+  const std::int64_t source_id = parse_body(recorded).find("record")->find("id")->as_i64();
+  const HttpResponse download = call(
+      fixture.workbench, "GET", "/api/records/" + std::to_string(source_id) + "/download");
+  CHECK_EQ(download.status, 200);
+
+  test::TempDir second_dir;
+  Workbench second(WorkbenchOptions{.data_dir = second_dir.path()});
+  std::string error;
+  CHECK(second.initialize(&error));
+  const HttpResponse imported =
+      call(second, "POST", "/api/records/import", {}, download.body);
+  CHECK_EQ(imported.status, 200);
+  const json::Value import_body = parse_body(imported);
+  CHECK(import_body.find("ok")->as_bool());
+  CHECK(!import_body.find("duplicate")->as_bool());
+  const std::int64_t imported_id = import_body.find("record")->find("id")->as_i64();
+  CHECK(imported_id > 0);
+  CHECK_EQ(import_body.find("record")->find("scenario")->as_string(),
+           std::string("counter-race"));
+
+  const HttpResponse duplicate =
+      call(second, "POST", "/api/records/import", {}, download.body);
+  CHECK_EQ(duplicate.status, 200);
+  const json::Value duplicate_body = parse_body(duplicate);
+  CHECK(duplicate_body.find("duplicate")->as_bool());
+  CHECK_EQ(duplicate_body.find("record")->find("id")->as_i64(), imported_id);
+
+  const HttpResponse replay = call(second, "POST", "/api/replay", {},
+                                   R"({"recordId":)" + std::to_string(imported_id) + "}");
+  CHECK_EQ(replay.status, 200);
+  CHECK(parse_body(replay).find("identical")->as_bool());
+
+  const HttpResponse malformed = call(second, "POST", "/api/records/import", {}, "not-a-record");
+  CHECK_EQ(malformed.status, 400);
+
+  const std::string file = second.records().front().file;
+  CHECK(std::filesystem::exists(file));
+  const HttpResponse deleted = call(
+      second, "POST", "/api/records/" + std::to_string(imported_id) + "/delete", {},
+      R"({"deleteFile":true})");
+  CHECK_EQ(deleted.status, 200);
+  CHECK(second.records().empty());
+  CHECK(!std::filesystem::exists(file));
+  CHECK_EQ(call(second, "POST", "/api/records/" + std::to_string(imported_id) + "/delete", {},
+                "{}")
+               .status,
+           404);
+}
+
+TEST(clear_breakpoints_endpoint) {
+  Fixture fixture;
+  CHECK_EQ(call(fixture.workbench, "POST", "/api/breakpoints", {}, R"({"type":"Step"})").status,
+           200);
+  CHECK_EQ(call(fixture.workbench, "POST", "/api/breakpoints", {}, R"({"task":2})").status,
+           200);
+  CHECK_EQ(fixture.workbench.breakpoints().size(), std::size_t(2));
+  const HttpResponse cleared =
+      call(fixture.workbench, "POST", "/api/breakpoints/clear", {}, "{}");
+  CHECK_EQ(cleared.status, 200);
+  CHECK(fixture.workbench.breakpoints().empty());
+}
+
+TEST(record_cap_evicts_memory_but_keeps_files) {
+  test::TempDir dir;
+  Workbench workbench(WorkbenchOptions{.data_dir = dir.path(), .max_records = 2});
+  std::string error;
+  CHECK(workbench.initialize(&error));
+  for (int i = 0; i < 3; ++i) {
+    const HttpResponse response = call(
+        workbench, "POST", "/api/record", {},
+        R"({"scenario":"counter-race","seed":)" + std::to_string(i) + "}");
+    CHECK_EQ(response.status, 200);
+  }
+  CHECK_EQ(workbench.records().size(), std::size_t(2));
+  CHECK(workbench.get_record(1) == nullptr);
+  CHECK(workbench.get_record(3) != nullptr);
+  std::size_t files = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(dir.path() + "/records")) {
+    if (entry.path().extension() == ".tmpo") ++files;
+  }
+  CHECK_EQ(files, std::size_t(3));
+}
+
 TEST(api_rejects_bad_inputs) {
   Fixture fixture;
   CHECK_EQ(call(fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"nope"})").status,

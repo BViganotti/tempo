@@ -1,4 +1,4 @@
-.PHONY: all build test clean asan tsan bench fuzz ui-smoke
+.PHONY: all build test clean asan tsan bench fuzz ui-smoke install-smoke soak
 
 BUILD ?= build
 
@@ -23,6 +23,12 @@ tsan:
 
 bench: build
 	./$(BUILD)/tempo_bench
+
+soak: build
+	ctest --test-dir $(BUILD) -R soak --output-on-failure
+
+install-smoke: build
+	./scripts/install_smoke.sh
 
 ui-smoke: build
 	./scripts/ui_smoke.sh

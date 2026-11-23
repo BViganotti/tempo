@@ -23,7 +23,12 @@ internet access at runtime.
 - A debugger over the event log: state reconstruction from watch deltas,
   breakpoints by type/task/text, reverse stepping, timeline and run diff.
 - A hardened local UI: random session token, Host/Origin checks, CSP, no CORS,
-  bounded parsers, SSE.
+  bounded parsers, SSE, background replay jobs, event filters, accessible
+  keyboard navigation and archived-record loading.
+- Operational hardening: a global record memory budget with eviction/archive,
+  owner-only data files, locale-independent persisted formatting, scenario
+  build fingerprints, full-width seeds, 64 MiB HTTP import/download, soak tests
+  and an end-to-end UI smoke script.
 
 The built-in demo is a real scheduling bug, not a scripted animation: two tasks
 read a shared counter, yield, then write back a stale value. The recorded run's
@@ -116,22 +121,30 @@ docs/            architecture, API, format, debugger, security, testing
 - [Scenarios](docs/SCENARIOS.md)
 - [Security model](docs/SECURITY.md)
 - [Testing and sanitizers](docs/TESTING.md)
-- [Building](docs/BUILD.md)
+- [Verification results](docs/VERIFICATION.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Building and installing](docs/BUILD.md)
 - [Limitations](LIMITATIONS.md)
 
 ## Verification
 
-The repository contains 37 ctest targets plus ASan/UBSan and TSan builds,
-deterministic mutation fuzzers for records/JSON/HTTP, and measured benchmarks.
+The repository contains 45 ctest targets plus ASan/UBSan and TSan builds,
+deterministic mutation fuzzers for records/JSON/HTTP, optional libFuzzer
+coverage-guided harnesses, an install smoke test, a headless UI smoke test and
+measured benchmarks.
 `FINAL_REPORT.md` records LOC, commit count, test commands/results, benchmark
 numbers and known gaps. `CHANGELOG.md` tracks the work.
 
 ## Scope and honesty
 
 Tempo records **cooperative** tasks and capability-mediated effects, not
-arbitrary preemptive native execution. Raw OS calls and unwatched locals are
-outside the replay/debug model; this is documented rather than hidden. If a
-feature is not implemented, it is listed in `LIMITATIONS.md`.
+arbitrary preemptive native execution. Raw OS calls, unwatched locals and
+unmediated threads are outside the replay/debug model; this is documented rather
+than hidden. Capability calls still execute synchronously on the scheduler
+thread, and records are loaded eagerly; both are bounded and documented in
+`LIMITATIONS.md`. TLS/signing and untrusted-scenario sandboxing remain explicit
+non-goals for a loopback developer tool. If a feature is not implemented, it is
+listed there.
 
 ## License
 

@@ -91,6 +91,7 @@ TEST(workbench_serves_ui_api_and_sse_over_the_real_server) {
   HttpServer server(options, [&workbench](const HttpRequest& request) {
     return workbench.handle(request);
   });
+  workbench.set_session_token(options.token);
   workbench.set_broadcaster([&server](std::string_view event, std::string_view data) {
     server.broadcast_sse(event, data);
   });

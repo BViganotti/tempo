@@ -371,7 +371,7 @@
     ctx.fillRect(0, 0, width, height);
 
     const lanes = state.timeline && state.timeline.lanes ? state.timeline.lanes : [];
-    const labelWidth = 104;
+    const labelWidth = 128;
     const padRight = 16;
     const padTop = 10;
     const total = Math.max(1, (state.record ? state.record.events : 1) - 1);
@@ -406,11 +406,11 @@
         ctx.fillStyle = "rgba(255,255,255,0.018)";
         ctx.fillRect(labelWidth, y, plotWidth, laneHeight);
       }
-      ctx.fillStyle = lane.failed ? "#ff8b8b" : "#9fb2cc";
-      const name = (lane.name || ("task " + lane.task)).slice(0, 14);
-      ctx.fillText(name, 8, mid + 4);
       ctx.fillStyle = "#3a4c68";
-      ctx.fillText("t" + lane.task, 80, mid + 4);
+      ctx.fillText("t" + lane.task, 8, mid + 4);
+      ctx.fillStyle = lane.failed ? "#ff8b8b" : "#9fb2cc";
+      const name = (lane.name || ("task " + lane.task)).slice(0, 13);
+      ctx.fillText(name, 38, mid + 4);
       ctx.strokeStyle = "#182334";
       ctx.beginPath();
       ctx.moveTo(labelWidth, y + laneHeight);
@@ -737,7 +737,7 @@
       if (!state.record || !state.total) return;
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
-      const labelWidth = 104;
+      const labelWidth = 128;
       const padRight = 16;
       const plotWidth = Math.max(40, rect.width - labelWidth - padRight);
       const ratio = clamp((x - labelWidth) / plotWidth, 0, 1);

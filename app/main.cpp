@@ -135,6 +135,7 @@ int main(int argc, char** argv) {
                            [&workbench](const tempo::HttpRequest& request) {
                              return workbench.handle(request);
                            });
+  workbench.set_session_token(server_options.token);
   workbench.set_broadcaster(
       [&server](std::string_view event, std::string_view data) {
         server.broadcast_sse(event, data);

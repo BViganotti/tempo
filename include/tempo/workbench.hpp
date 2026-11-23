@@ -63,6 +63,11 @@ class Workbench {
     broadcaster_ = std::move(broadcast);
   }
 
+  /// Token injected into the embedded index document so CSS/JS asset requests
+  /// carry the same session credential as the page. Set by the launcher before
+  /// the server starts.
+  void set_session_token(std::string token) { session_token_ = std::move(token); }
+
   struct RecordOutcome {
     bool ok = false;
     bool run_ok = false;
@@ -126,6 +131,7 @@ class Workbench {
   RecordId last_record_ = 0;
   std::vector<std::string> load_warnings_;
   std::function<void(std::string_view, std::string_view)> broadcaster_;
+  std::string session_token_;
 };
 
 /// Default workbench data directory for this platform.

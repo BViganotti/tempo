@@ -320,6 +320,22 @@ HttpResponse Workbench::static_response(std::string_view path) const {
   response.status = 200;
   response.content_type = std::string(assets::asset_mime(name));
   response.body = std::string(asset->body);
+  if (name == "index.html" && !session_token_.empty()) {
+    auto rewrite = [this, &response](std::string_view needle, std::string_view attribute) {
+      std::string replacement(attribute);
+      replacement += "?token=";
+      replacement += session_token_;
+      replacement += "\"";
+      std::size_t position = 0;
+      while ((position = response.body.find(needle, position)) != std::string::npos) {
+        response.body.replace(position, needle.size(), replacement);
+        position += replacement.size();
+      }
+    };
+    rewrite("href=\"/style.css\"", "href=\"/style.css");
+    rewrite("src=\"/app.js\"", "src=\"/app.js");
+    rewrite("href=\"/favicon.svg\"", "href=\"/favicon.svg");
+  }
   return response;
 }
 

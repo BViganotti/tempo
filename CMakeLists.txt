@@ -50,6 +50,9 @@ add_library(tempo STATIC
   src/debug/debug.cpp
   src/ui/json.cpp
   src/ui/http.cpp
+  src/ui/assets.cpp
+  src/scenario/registry.cpp
+  src/scenario/demo.cpp
 )
 target_include_directories(tempo PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -69,6 +72,28 @@ if(TEMPO_TSAN)
   target_compile_options(tempo PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
   target_link_options(tempo PUBLIC -fsanitize=thread)
 endif()
+
+# ---------------------------------------------------------------------------
+# UI embedding: original HTML/CSS/JS is compiled into the binary.
+# ---------------------------------------------------------------------------
+set(TEMPO_UI_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/ui/index.html
+  ${CMAKE_CURRENT_SOURCE_DIR}/ui/style.css
+  ${CMAKE_CURRENT_SOURCE_DIR}/ui/app.js
+  ${CMAKE_CURRENT_SOURCE_DIR}/ui/favicon.svg)
+set(TEMPO_UI_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tempo_assets.hpp)
+string(REPLACE ";" "," TEMPO_UI_FILES_ARG "${TEMPO_UI_FILES}")
+add_custom_command(
+  OUTPUT ${TEMPO_UI_HEADER}
+  COMMAND ${CMAKE_COMMAND}
+    -DOUT=${TEMPO_UI_HEADER}
+    -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    "-DFILES=${TEMPO_UI_FILES_ARG}"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedAssets.cmake
+  DEPENDS ${TEMPO_UI_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedAssets.cmake
+  COMMENT "Embedding Tempo UI assets")
+add_custom_target(tempo_assets DEPENDS ${TEMPO_UI_HEADER})
+add_dependencies(tempo tempo_assets)
 
 include(CTest)
 enable_testing()
@@ -100,6 +125,7 @@ if(BUILD_TESTING)
   tempo_add_test(breakpoint_test)
   tempo_add_test(json_test)
   tempo_add_test(http_test)
+  tempo_add_test(scenario_test)
   tempo_add_test(task_test)
   tempo_add_test(scheduler_test)
   tempo_add_test(cancellation_test)

@@ -29,12 +29,13 @@ struct Args {
   std::string data_dir;
   std::uint16_t port = 0;
   bool open_browser = true;
+  std::uint64_t max_memory_mb = 256;
 };
 
 void print_usage() {
   std::fprintf(stderr,
                "Tempo %s\n"
-               "usage: tempo_workbench [--data-dir PATH] [--port N] [--no-open]\n"
+               "usage: tempo_workbench [--data-dir PATH] [--port N] [--max-memory-mb N] [--no-open]\n"
                "\n"
                "Starts the local workbench on 127.0.0.1 and opens the default\n"
                "browser. There is no terminal workflow; press Ctrl+C to stop.\n",
@@ -58,6 +59,20 @@ bool parse_args(int argc, char** argv, Args* args, std::string* error) {
         return false;
       }
       args->data_dir = argv[++i];
+      continue;
+    }
+    if (arg == "--max-memory-mb") {
+      if (i + 1 >= argc) {
+        *error = "--max-memory-mb requires a value";
+        return false;
+      }
+      char* end = nullptr;
+      const long long value = std::strtoll(argv[++i], &end, 10);
+      if (end == nullptr || *end != '\0' || value < 1 || value > 16'384) {
+        *error = "--max-memory-mb must be 1..16384";
+        return false;
+      }
+      args->max_memory_mb = static_cast<std::uint64_t>(value);
       continue;
     }
     if (arg == "--port") {
@@ -122,6 +137,8 @@ int main(int argc, char** argv) {
 
   tempo::WorkbenchOptions workbench_options;
   workbench_options.data_dir = args.data_dir;
+  workbench_options.max_total_bytes =
+      static_cast<std::size_t>(args.max_memory_mb) * 1024u * 1024u;
   tempo::Workbench workbench(workbench_options);
   if (!workbench.initialize(&error)) {
     std::fprintf(stderr, "tempo: %s\n", error.c_str());

@@ -956,8 +956,37 @@
     });
   }
 
+  function runUiSelfTest() {
+    // Synchronous probe used by the headless smoke test. It exercises the real
+    // token, JSON and frame endpoints from the page context, then leaves a
+    // marker that `--dump-dom` can read deterministically.
+    try {
+      const overviewRequest = new XMLHttpRequest();
+      overviewRequest.open("GET", withToken("/api/overview"), false);
+      overviewRequest.send();
+      const overview = JSON.parse(overviewRequest.responseText);
+      const record = (overview.records || [])[0];
+      let marker = "no-records";
+      if (record) {
+        marker = record.scenario + "/" + record.events;
+        const frameRequest = new XMLHttpRequest();
+        frameRequest.open("GET", withToken("/api/records/" + record.id + "/frame?index=0"), false);
+        frameRequest.send();
+        const frame = JSON.parse(frameRequest.responseText);
+        marker += "/" + (frame.event ? frame.event.type : "no-event");
+      }
+      document.documentElement.setAttribute("data-tempo-selftest", marker);
+    } catch (error) {
+      document.documentElement.setAttribute("data-tempo-selftest", "error:" + error.message);
+    }
+  }
+
   function init() {
     $("delete-record").disabled = true;
+    const query = new URLSearchParams(location.search);
+    if (query.get("selftest") === "1") {
+      runUiSelfTest();
+    }
     const favicon = $("favicon");
     if (favicon) favicon.href = withToken("/favicon.svg");
     const typeSelect = $("bp-type");
@@ -974,7 +1003,10 @@
     }
     bindEvents();
     setStatus("connecting", "busy");
-    connectStream();
+    const noStream = query.get("nostream") === "1";
+    if (!noStream) {
+      connectStream();
+    }
     loadOverview().then(() => {
       if (state.records.length) setStatus("live", "live");
     }).catch((error) => {

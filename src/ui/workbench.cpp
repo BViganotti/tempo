@@ -406,16 +406,24 @@ Value Workbench::overview_json() const {
 }
 
 Value Workbench::event_json(std::size_t index, const Event& event) const {
+  // JSON numbers are IEEE doubles here. Values above 2^53 (notably 64-bit RNG
+  // draws) would lose precision, so they are rendered as decimal strings.
+  auto safe_number = [](std::uint64_t value) {
+    if (value <= 9'007'199'254'740'991ull) {
+      return Value(value);
+    }
+    return Value(std::to_string(value));
+  };
   Value value = Value::object();
   value["i"] = number(static_cast<std::uint64_t>(index));
   value["type"] = jstr(event_type_name(event.type));
   value["typeId"] = number(static_cast<std::uint64_t>(event.type));
   value["task"] = number(static_cast<std::uint64_t>(event.task));
-  value["a"] = number(event.a);
-  value["b"] = number(event.b);
-  value["c"] = number(event.c);
-  value["d"] = number(event.d);
-  value["time"] = number(event_time(event));
+  value["a"] = safe_number(event.a);
+  value["b"] = safe_number(event.b);
+  value["c"] = safe_number(event.c);
+  value["d"] = safe_number(event.d);
+  value["time"] = safe_number(event_time(event));
   value["bytesLen"] = number(static_cast<std::uint64_t>(event.bytes.size()));
   if (!event.s1.empty()) {
     value["s1"] = jstr(event.s1);

@@ -531,8 +531,7 @@ void Value::dump_to(std::string& out, int depth) const {
         out += "null";
         break;
       }
-      if (number_ == static_cast<double>(static_cast<std::int64_t>(number_)) &&
-          std::fabs(number_) < 9.0e15) {
+      if (std::fabs(number_) < 9.0e15 && number_ == std::floor(number_)) {
         out += std::to_string(static_cast<std::int64_t>(number_));
       } else {
         char buffer[40];

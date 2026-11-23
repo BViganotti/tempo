@@ -423,7 +423,8 @@ TEST(event_filters_page_over_matching_events) {
 
   const HttpResponse task = call(fixture.workbench, "GET", base, "task=2&limit=500");
   CHECK_EQ(task.status, 200);
-  for (const auto& event : parse_body(task).find("events")->items()) {
+  const json::Value task_body = parse_body(task);
+  for (const auto& event : task_body.find("events")->items()) {
     CHECK_EQ(event.find("task")->as_i64(), 2);
   }
 

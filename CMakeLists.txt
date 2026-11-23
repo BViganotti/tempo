@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(tempo
-  VERSION 0.1.0
+  VERSION 0.2.0
   DESCRIPTION "Deterministic record/replay workbench for cooperative C++ tasks"
   LANGUAGES CXX)
 
@@ -17,6 +17,8 @@ endif()
 option(TEMPO_SANITIZE "Build with address/undefined sanitizers" OFF)
 option(TEMPO_TSAN "Build with thread sanitizer" OFF)
 option(TEMPO_BUILD_TOOLS "Build demo, fuzz and benchmark tools" ON)
+option(TEMPO_LIBFUZZER "Build coverage-guided libFuzzer harnesses (Clang)" OFF)
+option(TEMPO_COVERAGE "Build with coverage instrumentation" OFF)
 
 set(TEMPO_WARNINGS
   -Wall
@@ -74,6 +76,10 @@ if(TEMPO_TSAN)
   target_compile_options(tempo PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
   target_link_options(tempo PUBLIC -fsanitize=thread)
 endif()
+if(TEMPO_COVERAGE)
+  target_compile_options(tempo PUBLIC -O0 -g --coverage)
+  target_link_options(tempo PUBLIC --coverage)
+endif()
 
 # ---------------------------------------------------------------------------
 # UI embedding: original HTML/CSS/JS is compiled into the binary.
@@ -119,6 +125,27 @@ target_compile_options(tempo_workbench PRIVATE ${TEMPO_WARNINGS})
 add_executable(tempo_example examples/tempo_demo/main.cpp)
 target_link_libraries(tempo_example PRIVATE tempo)
 target_compile_options(tempo_example PRIVATE ${TEMPO_WARNINGS})
+
+if(TEMPO_LIBFUZZER)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+  check_cxx_source_compiles(
+    "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long){return 0;}"
+    TEMPO_HAVE_LIBFUZZER)
+  unset(CMAKE_REQUIRED_FLAGS)
+  if(NOT TEMPO_HAVE_LIBFUZZER)
+    message(FATAL_ERROR
+      "TEMPO_LIBFUZZER=ON requires a Clang toolchain with the compiler-rt libFuzzer runtime. "
+      "Apple Clang does not ship it; use e.g. -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++.")
+  endif()
+  foreach(_fuzzer libfuzzer_record libfuzzer_json)
+    add_executable(${_fuzzer} fuzz/${_fuzzer}.cpp)
+    target_link_libraries(${_fuzzer} PRIVATE tempo)
+    target_compile_options(${_fuzzer} PRIVATE ${TEMPO_WARNINGS}
+      -fsanitize=fuzzer,undefined -fno-omit-frame-pointer -g)
+    target_link_options(${_fuzzer} PRIVATE -fsanitize=fuzzer,undefined)
+  endforeach()
+endif()
 
 add_executable(tempo_bench bench/bench.cpp)
 target_link_libraries(tempo_bench PRIVATE tempo)

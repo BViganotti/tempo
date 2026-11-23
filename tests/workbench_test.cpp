@@ -432,6 +432,49 @@ TEST(event_filters_page_over_matching_events) {
   CHECK_EQ(call(fixture.workbench, "GET", base, "task=not-a-number").status, 400);
 }
 
+TEST(seed_accepts_full_64_bit_decimal_strings) {
+  Fixture fixture;
+  const HttpResponse recorded = call(
+      fixture.workbench, "POST", "/api/record", {},
+      R"({"scenario":"counter-race","seed":"18446744073709551615"})");
+  CHECK_EQ(recorded.status, 200);
+  const json::Value body = parse_body(recorded);
+  CHECK_EQ(body.find("record")->find("seed")->as_string(),
+           std::string("18446744073709551615"));
+  CHECK(!body.find("record")->find("uid")->as_string().empty());
+  const std::int64_t id = body.find("record")->find("id")->as_i64();
+  const HttpResponse replay = call(fixture.workbench, "POST", "/api/replay", {},
+                                   R"({"recordId":)" + std::to_string(id) + "}");
+  CHECK_EQ(replay.status, 200);
+  CHECK(parse_body(replay).find("identical")->as_bool());
+}
+
+TEST(record_import_accepts_payloads_above_the_old_256k_limit) {
+  Record large;
+  large.meta.scenario = "import-large";
+  for (int i = 0; i < 4000; ++i) {
+    Event event;
+    event.type = EventType::Log;
+    event.task = 1;
+    event.s1 = "log-" + std::to_string(i) + "-" + std::string(48, 'x');
+    large.events.push_back(event);
+  }
+  large.recompute_hash();
+  const SerializeOutcome serialized = serialize_record(large);
+  CHECK(serialized.ok);
+  CHECK(serialized.bytes.size() > 256 * 1024);
+  CHECK(serialized.bytes.size() < limits::kMaxHttpBodyBytes);
+  test::TempDir dir;
+  Workbench workbench(WorkbenchOptions{.data_dir = dir.path()});
+  std::string error;
+  CHECK(workbench.initialize(&error));
+  const HttpResponse imported =
+      call(workbench, "POST", "/api/records/import", {}, serialized.bytes);
+  CHECK_EQ(imported.status, 200);
+  CHECK(parse_body(imported).find("ok")->as_bool());
+  CHECK_EQ(workbench.records().size(), std::size_t(1));
+}
+
 TEST(api_rejects_bad_inputs) {
   Fixture fixture;
   CHECK_EQ(call(fixture.workbench, "POST", "/api/record", {}, R"({"scenario":"nope"})").status,

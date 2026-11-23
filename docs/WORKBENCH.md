@@ -15,10 +15,13 @@ Tempo/
   fixtures/...            # written by built-in scenarios before recording
 ```
 
-Records are saved atomically with mode `0600`. The workbench keeps at most 16
-records in memory (newest first); older files remain on disk. Record IDs are
-process-local and assigned in creation order. Duplicate hashes are skipped on
-startup.
+Records are saved atomically with mode `0600`. Data, records and fixture
+directories are chmod'ed owner-only. The workbench keeps at most 16 records in
+memory and enforces an approximate global memory budget (default 256 MiB,
+`--max-memory-mb`). Records evicted by the cap or budget are listed in the
+archive and can be reloaded without restarting. Record IDs are process-local and
+assigned in creation order; the full record hash is exposed as a stable `uid`.
+Duplicate hashes are skipped on startup.
 
 ## Endpoints
 
@@ -30,14 +33,20 @@ loopback `Host`. JSON responses use `application/json; charset=utf-8`. Errors ar
 |---|---|---|
 | GET | `/` | embedded `index.html` |
 | GET | `/style.css`, `/app.js`, `/favicon.svg` | embedded assets |
-| GET | `/api/overview` | version, scenarios, records, breakpoints, warnings |
+| GET | `/api/overview` | version, scenarios, records, breakpoints, archive, memory, warnings |
+| GET | `/api/health` | readiness, record count, memory usage/budget |
 | GET | `/api/stream` | SSE: initial comment, `overview` and `replay` events |
 | POST | `/api/record` | `{scenario, seed, mutateStep?, mutateChoice?}` |
-| POST | `/api/replay` | `{recordId, runs?, mutateStep?, mutateChoice?}` |
+| POST | `/api/replay` | `{recordId, runs?, mutateStep?, mutateChoice?, async?}` |
+| GET | `/api/jobs` | replay job list |
+| GET | `/api/jobs/{id}` | job status and eventual result |
+| GET | `/api/archive` | records kept on disk outside the memory cap |
+| POST | `/api/records/open` | `{file}` reload an archived record |
 | GET | `/api/records/{id}/events` | `from`, `limit` (≤500) event page |
 | GET | `/api/records/{id}/frame` | `index`; event, exact watch state |
 | GET | `/api/records/{id}/timeline` | lane summaries plus bounded ticks |
-| GET | `/api/records/{id}/download` | portable `.tmpo` (≤4 MiB via HTTP) |
+| GET | `/api/records/{id}/download` | portable `.tmpo` (≤64 MiB via HTTP) |
+| POST | `/api/records/{id}/delete` | `{deleteFile?}` remove memory and optionally file |
 | GET | `/api/records/{id}/diff` | `other=<id>`; first difference + counts |
 | GET | `/api/records/{id}/breakpoints/next` | `from`, `direction=1|-1` |
 | GET | `/api/breakpoints` | list breakpoints |
@@ -46,14 +55,22 @@ loopback `Host`. JSON responses use `application/json; charset=utf-8`. Errors ar
 | POST | `/api/breakpoints/remove` | `{id}` |
 | POST | `/api/breakpoints/clear` | remove all |
 
-`/api/record` returns `{ok, runOk, summary, record?, error?, warning?}`. A run that
+`/api/record` accepts `seed` as a JSON number or a decimal string, so the full
+64-bit seed range is addressable. It returns `{ok, runOk, summary, record?,
+error?, warning?}`. A run that
 failed still returns a complete, replayable record; `runOk` describes the run and
 `ok` describes capture. `record` contains metadata, event count, hash, seed,
 creation time, completeness and warning.
 
+With `async: true`, `/api/replay` returns `202 {ok, jobId, status}` immediately
+and the batch runs on the background worker. Poll `/api/jobs/{id}`:
+`{id, status: queued|running|done|error, runs, result?, error?}`. The result has
+the same shape as the synchronous response.
+
 `/api/replay` returns `{ok, recordId, runs, identical, allHashesEqual,
 allIdentical, replayedHash, expectedHash, recordedEvents, replayedEvents,
-elapsedNs, hashes[], divergence, summary?, failedRun?, mutationApplied?, error?}`.
+elapsedNs, hashes[], divergence, buildMismatch?, buildWarning?, summary?,
+failedRun?, mutationApplied?, error?}`.
 For a single run, `divergence` contains `found`, `index`, `reason`,
 `expectedSummary`, `actualSummary` and presence flags. For batches, `failedRun`
 is the 0-based first failing run or `-1`.
@@ -75,16 +92,20 @@ bounded (128 queued frames) and are delivered by the poll loop.
 
 ## UI walkthrough
 
-1. **Record** — pick a scenario, seed, and optionally an altered scheduling step.
-   The page auto-records `counter-race` on a fresh data directory.
+1. **Record** — pick a scenario, full-width seed string, and optionally an
+   altered scheduling step. The page auto-records `counter-race` on a fresh data
+   directory. Import a `.tmpo` file (up to 64 MiB) or load an archived one.
 2. **Records** — click a record to load its timeline, event window and inspector.
 3. **Timeline** — one lane per task; event ticks are colored by category. Click
    anywhere to jump to the nearest index; the gold line is the current event.
 4. **Step** — buttons, scrubber, arrow keys, Home/End. Every step asks the server
-   for the exact watch state at that index.
+   for the exact watch state at that index. Event rows are keyboard-focusable;
+   event type/task filters page over matching events.
 5. **Breakpoints** — add by type/task/text, toggle or remove; run forward or
    backward to the next match.
-6. **Replay** — `Replay` proves a single run; `Replay ×100` checks hash stability.
+6. **Replay** — `Replay` proves a single run; `Replay ×100` checks hash stability
+   on the background worker and polls job status, so the page stays responsive.
+   A build-id mismatch is surfaced in the result.
 7. **Altered schedule** — set a step and choice, then replay. The first
    divergence is shown with both event summaries; the timeline marks it red.
 8. **Run diff** — compare two records; shows the first differing event and

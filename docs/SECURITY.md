@@ -36,7 +36,7 @@ the user's memory or data directory can read records.
 
 ## Input hardening
 
-- HTTP: 16 KiB headers, 256 KiB body, 32 connections, 64 headers, origin-form
+- HTTP: 16 KiB headers, 64 MiB body (aligned with the record cap), 32 connections, 64 headers, origin-form
   targets only, duplicate headers rejected, obsolete folding rejected,
   `Transfer-Encoding` rejected, query ≤ 2 KiB, 15-second request deadline.
 - JSON: 1 MiB input, depth 32, 100,000 array items, 2,048 object fields, 65,536-byte
@@ -46,8 +46,9 @@ the user's memory or data directory can read records.
   complete file.
 - Replay: max 200 runs per batch, step/task/time limits from `SchedulerOptions`.
 - Breakpoints: 128 per workbench, 128-byte text. Records: 16 in memory.
-- The UI downloads records through a 4 MiB response cap; larger files can be
-  copied from the data directory directly.
+- Responses are capped at 64 MiB and the outbound buffer at 160 MiB. The HTTP
+  body limit, import limit and record file cap are all 64 MiB; a single record
+  larger than the workbench memory budget is rejected before saving.
 
 `HttpServer` is single-threaded. `Workbench` is documented as single-threaded
 and is only called by the loop thread (or a test thread). The SSE broadcast queue
@@ -66,8 +67,11 @@ integration tests.
 - there are no unlink, rename, chmod or directory-listing capabilities.
 
 The workbench writes scenario fixtures under the same root and record files under
-`<data_root>/records/` with mode `0600`. Records may contain file contents that a
-scenario read; treat the data directory as sensitive.
+`<data_root>/records/` with mode `0600`. The data root, records directory and
+fixture directories are chmod'ed to owner-only (`0700`) on creation. Records may
+contain file contents that a scenario read; treat the data directory as
+sensitive. Records evicted from memory remain in the records directory and are
+listed in the workbench archive; they are only reloaded on explicit request.
 
 Sockets are limited to loopback and use bounded send/receive timeouts. Replay
 never opens a socket.
@@ -78,5 +82,6 @@ never opens a socket.
   the embedding application compiled; it can call any OS API. Use a process
   sandbox if you do not trust the scenario.
 - Tempo does not encrypt or sign records. CRC32 detects accidental corruption,
-  not tampering.
+  not tampering. There is no TLS because the UI is loopback-only; the session
+  token rotates only on restart.
 - The virtual RNG is deterministic, not cryptographic.

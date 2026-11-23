@@ -984,9 +984,6 @@
   function init() {
     $("delete-record").disabled = true;
     const query = new URLSearchParams(location.search);
-    if (query.get("selftest") === "1") {
-      runUiSelfTest();
-    }
     const favicon = $("favicon");
     if (favicon) favicon.href = withToken("/favicon.svg");
     const typeSelect = $("bp-type");
@@ -1002,6 +999,9 @@
       $("filter-type").appendChild(option);
     }
     bindEvents();
+    if (query.get("selftest") === "1") {
+      runUiSelfTest();
+    }
     setStatus("connecting", "busy");
     const noStream = query.get("nostream") === "1";
     if (!noStream) {

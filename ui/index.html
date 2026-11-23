@@ -117,6 +117,12 @@
       <section class="split">
         <div class="panel events-panel">
           <div class="panel-head"><h2>Events</h2><span id="event-page" class="hint"></span></div>
+          <div class="filter-row" role="group" aria-label="Event filters">
+            <select id="filter-type" aria-label="Event type filter"><option value="">all types</option></select>
+            <input id="filter-task" type="number" min="0" placeholder="task id" aria-label="Task id filter">
+            <button id="filter-apply">Filter</button>
+            <button id="filter-clear">Clear</button>
+          </div>
           <div class="table-wrap">
             <table id="events">
               <thead><tr><th>#</th><th>Type</th><th>Task</th><th>Time</th><th>Summary</th></tr></thead>

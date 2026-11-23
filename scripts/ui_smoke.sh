@@ -88,6 +88,8 @@ if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
     grep -q 'data-tempo-selftest="counter-race/' "$DOM" ||
       fail "DOM self-test did not reach the demo record"
     grep -q 'Timeline' "$DOM" || fail "DOM did not render the timeline panel"
+    grep -q 'id="filter-type"' "$DOM" || fail "DOM missing event filters"
+    grep -q 'id="archive-select"' "$DOM" || fail "DOM missing archive controls"
   else
     echo "ui_smoke: chromium produced no DOM (non-fatal)" >&2
   fi

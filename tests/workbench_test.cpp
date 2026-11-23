@@ -50,7 +50,7 @@ TEST(overview_lists_scenarios_and_is_initialized) {
   const json::Value body = parse_body(response);
   CHECK_EQ(body.find("scenarios")->items().size(), std::size_t(3));
   CHECK(body.find("records")->items().empty());
-  CHECK_EQ(body.find("version")->as_string(), std::string("0.1.0"));
+  CHECK_EQ(body.find("version")->as_string(), std::string("0.2.0"));
 }
 
 TEST(static_assets_are_embedded) {

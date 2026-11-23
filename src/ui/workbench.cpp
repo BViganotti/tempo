@@ -1423,6 +1423,10 @@ Workbench::ReplayOutcome Workbench::replay(RecordId id, std::uint32_t runs,
     outcome.error = "record not found";
     return outcome;
   }
+  if (!record->complete) {
+    outcome.error = "cannot replay an incomplete record";
+    return outcome;
+  }
   const ScenarioInfo* scenario = find_scenario(record->meta.scenario);
   if (scenario == nullptr) {
     outcome.error = "scenario is not registered: " + record->meta.scenario;
